@@ -1,0 +1,35 @@
+# Local development dependencies. NOT yet exercised in the build workspace (no Docker daemon run here).
+# Usage:  docker compose -f infra/docker-compose.yml up -d
+# App services (api/worker/web) are added once their Dockerfiles exist (milestones M3, M6, M10).
+name: reelqueue
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: reelqueue
+      POSTGRES_PASSWORD: reelqueue        # local development only
+      POSTGRES_DB: reelqueue
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reelqueue -d reelqueue"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    # BullMQ requires noeviction; AOF keeps queue state across restarts
+    command: ["redis-server", "--maxmemory-policy", "noeviction", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
+  redisdata:

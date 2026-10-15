@@ -1,0 +1,20 @@
+{
+  "name": "reelqueue",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Multi-tenant SaaS for bulk Instagram Reels scheduling via official Meta APIs",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test:core": "pnpm --filter @reelqueue/core test",
+    "typecheck:core": "pnpm --filter @reelqueue/core typecheck",
+    "db:verify": "./scripts/verify-db.sh",
+    "test": "pnpm test:core",
+    "typecheck": "pnpm typecheck:core"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.3"
+  }
+}
