@@ -1,0 +1,15 @@
+{
+  "name": "@reelqueue/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SQL persistence (framework-agnostic): JobStore and scheduler store over a tiny SqlExecutor port. Tested against real PostgreSQL.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "tsx --test \"test/**/*.test.ts\""
+  },
+  "dependencies": { "@reelqueue/core": "workspace:*" },
+  "devDependencies": { "@types/node": "^22.0.0", "tsx": "^4.20.0", "typescript": "~6.0.3" }
+}
