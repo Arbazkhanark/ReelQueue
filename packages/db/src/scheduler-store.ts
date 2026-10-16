@@ -127,6 +127,17 @@ export class SchedulerStore {
     return r[0] ? mapCycle(r[0]) : null;
   }
 
+  /** System use (worker): no tenant filter. Never expose through a user-facing endpoint. */
+  async getCycleById(cycleId: string): Promise<CycleRow | null> {
+    const r = await this.db.query('SELECT * FROM publishing_cycles WHERE id = $1', [cycleId]);
+    return r[0] ? mapCycle(r[0]) : null;
+  }
+
+  async getJobAccount(jobId: string): Promise<string | null> {
+    const r = await this.db.query('SELECT instagram_account_id FROM publish_jobs WHERE id = $1', [jobId]);
+    return r[0] ? String(r[0].instagram_account_id) : null;
+  }
+
   async getLiveCycle(userId: string): Promise<CycleRow | null> {
     const r = await this.db.query(
       `SELECT * FROM publishing_cycles WHERE user_id = $1 AND status IN ('ACTIVE','PAUSED') ORDER BY started_at DESC LIMIT 1`,
@@ -315,7 +326,7 @@ export class SchedulerStore {
    * Safety net for lost Redis state: due, unleased jobs whose cycle is ACTIVE, plus jobs that must be reconciled
    * (PUBLISH_REQUESTED / ACCEPTED) regardless of cycle state, ordered so each account is served in sequence.
    */
-  async findDueJobs(now: Date, limit: number): Promise<{ id: string; accountId: string; dueAt: Date }[]> {
+  async findDueJobs(now: Date, limit: number, accountId?: string): Promise<{ id: string; accountId: string; dueAt: Date }[]> {
     const r = await this.db.query(
       `SELECT j.id, j.instagram_account_id, j.next_attempt_at
          FROM publish_jobs j JOIN publishing_cycles c ON c.id = j.cycle_id
@@ -323,9 +334,10 @@ export class SchedulerStore {
           AND j.next_attempt_at <= $2::timestamptz
           AND (j.lease_owner IS NULL OR j.lease_expires_at <= $2::timestamptz)
           AND (c.status = 'ACTIVE' OR j.status IN ('PUBLISH_REQUESTED', 'ACCEPTED'))
+          AND ($4::text IS NULL OR j.instagram_account_id::text = $4::text)
         ORDER BY j.instagram_account_id, c.started_at, j.sequence_no
         LIMIT $3`,
-      [TERMINAL_STATUS_LIST, now, limit],
+      [TERMINAL_STATUS_LIST, now, limit, accountId ?? null],
     );
     return r.map((x) => ({ id: String(x.id), accountId: String(x.instagram_account_id), dueAt: toDate(x.next_attempt_at) }));
   }

@@ -1,0 +1,15 @@
+{
+  "name": "@reelqueue/services",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Framework-free application services: scheduler runner (tick / execute / sweep). BullMQ and Nest only wrap these.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "tsx --test \"test/**/*.test.ts\""
+  },
+  "dependencies": { "@reelqueue/core": "workspace:*", "@reelqueue/db": "workspace:*" },
+  "devDependencies": { "@types/node": "^22.0.0", "tsx": "^4.20.0", "typescript": "~6.0.3" }
+}
