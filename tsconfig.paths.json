@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@reelqueue/core": ["packages/core/src/index.ts"],
+      "@reelqueue/shared": ["packages/shared/src/index.ts"],
+      "@reelqueue/db": ["packages/db/src/index.ts"],
+      "@reelqueue/services": ["packages/services/src/index.ts"],
+      "@reelqueue/integrations": ["packages/integrations/src/index.ts"]
+    }
+  }
+}

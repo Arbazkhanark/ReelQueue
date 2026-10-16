@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Charter, Georgia, serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* warm paper + ink, burnt-orange accent */
+  --c-bg: 246 243 237;
+  --c-surface: 255 253 249;
+  --c-sunken: 238 233 225;
+  --c-ink: 28 25 23;
+  --c-muted: 98 91 84;
+  --c-line: 220 213 202;
+  --c-accent: 178 58 10;
+  --c-accent-ink: 255 255 255;
+  --c-ok: 21 118 56;
+  --c-warn: 161 73 6;
+  --c-danger: 185 28 28;
+  --c-info: 3 96 150;
+  --c-sim: 15 108 100;
+  color-scheme: light;
+}
+.dark {
+  --c-bg: 20 17 15;
+  --c-surface: 31 27 24;
+  --c-sunken: 14 12 10;
+  --c-ink: 245 241 234;
+  --c-muted: 170 162 152;
+  --c-line: 62 56 50;
+  --c-accent: 251 146 60;
+  --c-accent-ink: 28 25 23;
+  --c-ok: 74 222 128;
+  --c-warn: 251 191 36;
+  --c-danger: 248 113 113;
+  --c-info: 56 189 248;
+  --c-sim: 45 212 191;
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-bg font-sans text-ink antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display tracking-tight;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-bg;
+  }
+  dialog::backdrop {
+    background: rgb(0 0 0 / 0.55);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex min-h-[2.5rem] items-center justify-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn border-accent bg-accent text-accent-ink hover:brightness-110;
+  }
+  .btn-secondary {
+    @apply btn border-line bg-surface text-ink hover:bg-sunken;
+  }
+  .btn-danger {
+    @apply btn border-danger bg-danger text-white hover:brightness-110 dark:text-black;
+  }
+  .btn-ghost {
+    @apply btn border-transparent bg-transparent text-ink hover:bg-sunken;
+  }
+  .btn-sm {
+    @apply min-h-[2rem] px-3 py-1 text-xs;
+  }
+  .input {
+    @apply block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted disabled:opacity-60 aria-[invalid=true]:border-danger;
+  }
+  .card {
+    @apply rounded-lg border border-line bg-surface p-5 shadow-card;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium;
+  }
+  .skeleton {
+    @apply animate-pulse rounded bg-sunken;
+  }
+  .label {
+    @apply mb-1 block text-sm font-medium;
+  }
+  .th {
+    @apply whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted;
+  }
+  .td {
+    @apply px-3 py-2 align-top text-sm;
+  }
+}

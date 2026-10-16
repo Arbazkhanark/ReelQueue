@@ -1,0 +1,15 @@
+{
+  "name": "@reelqueue/integrations",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Adapters to external systems: S3/R2 storage (own SigV4 signer, no AWS SDK), Meta Instagram provider, ffprobe media probe.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "tsx --test \"test/**/*.test.ts\""
+  },
+  "dependencies": { "@reelqueue/core": "workspace:*" },
+  "devDependencies": { "@types/node": "^22.0.0", "tsx": "^4.20.0", "typescript": "~6.0.3" }
+}
