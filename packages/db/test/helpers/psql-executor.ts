@@ -63,10 +63,11 @@ class Session {
       };
     });
     // \echo is client-side: it still works inside an aborted transaction (a SELECT sentinel would not)
-    this.proc.stdin.write(`${statement};\n\\if :ERROR\n\\echo ${FAIL}\n\\endif\n\\echo ${DONE}\n`);
+    this.proc.stdin.write(`${statement.replace(/[\s;]+$/, '')};\n\\if :ERROR\n\\echo ${FAIL}\n\\endif\n\\echo ${DONE}\n`);
     await done;
     await new Promise((r) => setTimeout(r, 5)); // let stderr drain
-    const failed = this.out.includes(FAIL);
+    // :ERROR reflects only the LAST statement of a multi-statement script, so also look at stderr
+    const failed = this.out.includes(FAIL) || /ERROR:\s+\w{5}:/.test(this.err);
     return { stdout: this.out.replace(FAIL, '').replace(DONE, ''), failed, stderr: this.err };
   }
 

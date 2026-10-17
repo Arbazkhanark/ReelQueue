@@ -4,3 +4,5 @@ export * from './scheduler-store';
 export * from './auth-store';
 export * from './video-store';
 export * from './app-store';
+export * from './pg-executor';
+export * from './migrator';

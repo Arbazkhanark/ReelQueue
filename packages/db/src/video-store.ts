@@ -69,6 +69,12 @@ export class VideoStore {
     });
   }
 
+  /** System use (publish executor): the object key for a video that is still usable. Never expose through an API. */
+  async getStorageKeyForPublishing(videoId: string): Promise<string | null> {
+    const r = await this.db.query(`SELECT storage_key FROM videos WHERE id = $1 AND status = 'READY' AND deleted_at IS NULL`, [videoId]);
+    return r[0] ? String(r[0].storage_key) : null;
+  }
+
   async getVideo(userId: string, videoId: string): Promise<VideoRow | null> {
     const rows = await this.db.query(`SELECT ${COLS} FROM videos WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`, [videoId, userId]);
     return rows[0] ? mapVideo(rows[0]) : null;

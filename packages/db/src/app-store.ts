@@ -49,6 +49,11 @@ const mapAccount = (r: Row): AccountRow => ({
 
 export class AccountStore {
   constructor(private readonly db: SqlExecutor) {}
+  /** System use (worker/provider): token ciphertext + provider id. NEVER expose through an API. */
+  async getCredentials(accountId: string): Promise<{ userId: string; provider: 'META' | 'MOCK'; providerAccountId: string; accessTokenEnc: string | null; status: AccountRow['status'] } | null> {
+    const r = (await this.db.query(`SELECT user_id, provider, provider_account_id, access_token_enc, status FROM instagram_accounts WHERE id = $1`, [accountId]))[0];
+    return r ? { userId: String(r.user_id), provider: r.provider as 'META' | 'MOCK', providerAccountId: String(r.provider_account_id), accessTokenEnc: toStrOrNull(r.access_token_enc), status: r.status as AccountRow['status'] } : null;
+  }
   async list(userId: string): Promise<AccountRow[]> {
     return (await this.db.query(`SELECT ${ACC_COLS} FROM instagram_accounts WHERE user_id = $1 AND status <> 'DISCONNECTED' ORDER BY created_at, id`, [userId])).map(mapAccount);
   }
