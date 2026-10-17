@@ -1,0 +1,11 @@
+{
+  "name": "@reelqueue/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Environment config validation + composition root shared by the API and worker entrypoints. Dependency-free of bullmq/pg/nest; verified on real PostgreSQL.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc -p tsconfig.test.json --noEmit", "test": "tsx --test \"test/**/*.test.ts\"" },
+  "dependencies": { "@reelqueue/core": "workspace:*", "@reelqueue/db": "workspace:*", "@reelqueue/http": "workspace:*", "@reelqueue/integrations": "workspace:*", "@reelqueue/services": "workspace:*" },
+  "devDependencies": { "@types/node": "^22.0.0", "tsx": "^4.20.0", "typescript": "~6.0.3" }
+}

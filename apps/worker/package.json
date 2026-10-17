@@ -1,0 +1,14 @@
+{
+  "name": "@reelqueue/worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BullMQ worker: wraps SchedulerRunner. src/{wake-queue,processor,sweeper} are verified with fakes; src/main.ts (bullmq/ioredis/pg wiring) is UNVERIFIED until dependencies can be installed.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "tsx --test \"test/**/*.test.ts\"",
+    "start": "node dist/main.js"
+  },
+  "dependencies": { "@reelqueue/core": "workspace:*", "@reelqueue/db": "workspace:*", "@reelqueue/integrations": "workspace:*", "@reelqueue/runtime": "workspace:*", "@reelqueue/services": "workspace:*", "bullmq": "^5.0.0", "ioredis": "^5.0.0", "pg": "^8.0.0" },
+  "devDependencies": { "@types/node": "^22.0.0", "@types/pg": "^8.0.0", "tsx": "^4.20.0", "typescript": "~6.0.3" }
+}
