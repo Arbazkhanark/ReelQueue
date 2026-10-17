@@ -17,3 +17,4 @@ export * from './security/oauth-state';
 export * from './security/redact';
 export * from './security/tokens';
 export * from './ports/storage';
+export * from './domain/uploads';
