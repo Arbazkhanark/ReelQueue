@@ -42,11 +42,17 @@ export class UploadService {
   constructor(
     private readonly store: VideoStore, private readonly storage: StorageProvider, private readonly media: MediaProbe,
     private readonly clock: Clock, private readonly cfg: UploadConfig = DEFAULT_UPLOAD_CONFIG, private readonly log: ServiceLogger = NOOP_LOG,
+    /** Per-user limit overrides (e.g. from user_settings). Absent = the global config applies to everyone. */
+    private readonly limitsFor?: (userId: string) => Promise<Partial<UploadLimits>>,
   ) {}
+
+  private async limits(userId: string): Promise<UploadLimits> {
+    return this.limitsFor ? { ...this.cfg.limits, ...(await this.limitsFor(userId)) } : this.cfg.limits;
+  }
 
   async createBatch(userId: string, files: readonly UploadFileSpec[]): Promise<CreateBatchResult> {
     const now = this.clock.now();
-    const r = await this.store.reserveBatch({ userId, files, limits: this.cfg.limits, now, ttlMs: this.cfg.ttlSeconds * 1000, newKey: buildStorageKey });
+    const r = await this.store.reserveBatch({ userId, files, limits: await this.limits(userId), now, ttlMs: this.cfg.ttlSeconds * 1000, newKey: buildStorageKey });
     if (!r.ok) throw new AppError(r.code, r.message);
     if (!r.batch) return { batchId: null, expiresAt: null, uploads: [], rejected: r.rejected };
     const uploads: UploadTarget[] = [];
@@ -106,8 +112,9 @@ export class UploadService {
 
   async usage(userId: string) {
     const u = await this.store.getUsage(userId);
-    const { percentUsed, level } = storageLevel(u.bytesTotalHeld, this.cfg.limits.quotaBytes);
-    return { usedBytes: u.bytesUsed, reservedBytes: u.bytesReserved, quotaBytes: this.cfg.limits.quotaBytes, videoCount: u.videoCount, maxVideos: this.cfg.limits.maxVideos, percentUsed, level };
+    const lim = await this.limits(userId);
+    const { percentUsed, level } = storageLevel(u.bytesTotalHeld, lim.quotaBytes);
+    return { usedBytes: u.bytesUsed, reservedBytes: u.bytesReserved, quotaBytes: lim.quotaBytes, videoCount: u.videoCount, maxVideos: lim.maxVideos, percentUsed, level };
   }
 
   async reorder(userId: string, orderedIds: readonly string[]): Promise<void> {

@@ -148,8 +148,9 @@ export class SchedulerStore {
 
   async recordQuota(accountId: string, quota: PublishQuota): Promise<void> {
     await this.db.exec(
-      `UPDATE instagram_accounts SET last_quota_used = $2, last_quota_total = $3, last_quota_fetched_at = $4::timestamptz WHERE id = $1`,
-      [accountId, Math.max(0, Math.trunc(quota.used)), Math.max(0, Math.trunc(quota.total)), quota.fetchedAt],
+      `UPDATE instagram_accounts SET last_quota_used = $2, last_quota_total = $3, last_quota_fetched_at = $4::timestamptz,
+              last_quota_window_seconds = $5 WHERE id = $1`,
+      [accountId, Math.max(0, Math.trunc(quota.used)), Math.max(0, Math.trunc(quota.total)), quota.fetchedAt, quota.windowSeconds > 0 ? Math.trunc(quota.windowSeconds) : null],
     );
   }
 
