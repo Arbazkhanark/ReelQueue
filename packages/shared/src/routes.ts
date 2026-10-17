@@ -19,11 +19,11 @@ const r = <Req = void, Res = void>(method: RouteSpec['method'], path: string, au
 });
 
 export const ROUTES = {
-  register: r<D.RegisterRequest, D.AuthResponse>('POST', '/v1/auth/register', 'none'),
+  register: r<D.RegisterRequest, D.RegisterResponse>('POST', '/v1/auth/register', 'none'),
   verifyEmail: r<D.VerifyEmailRequest, void>('POST', '/v1/auth/verify-email', 'none'),
   login: r<D.LoginRequest, D.AuthResponse>('POST', '/v1/auth/login', 'none'),
   refresh: r<void, D.AuthResponse>('POST', '/v1/auth/refresh', 'none'),
-  logout: r<void, void>('POST', '/v1/auth/logout', 'user'),
+  logout: r<void, void>('POST', '/v1/auth/logout', 'none'),
   forgotPassword: r<D.ForgotPasswordRequest, void>('POST', '/v1/auth/forgot-password', 'none'),
   resetPassword: r<D.ResetPasswordRequest, void>('POST', '/v1/auth/reset-password', 'none'),
 

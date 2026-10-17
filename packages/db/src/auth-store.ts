@@ -3,14 +3,15 @@ import { isUniqueViolation, toDate, toDateOrNull, toNum, type Row, type SqlExecu
 export interface UserRow {
   id: string; email: string; passwordHash: string; role: 'USER' | 'ADMIN';
   status: 'ACTIVE' | 'SUSPENDED' | 'PENDING_DELETION';
-  emailVerifiedAt: Date | null; failedLoginCount: number; lockedUntil: Date | null;
+  emailVerifiedAt: Date | null; failedLoginCount: number; lockedUntil: Date | null; createdAt: Date; deletionRequestedAt: Date | null;
 }
 const mapUser = (r: Row): UserRow => ({
   id: String(r.id), email: String(r.email), passwordHash: String(r.password_hash), role: r.role as UserRow['role'],
   status: r.status as UserRow['status'], emailVerifiedAt: toDateOrNull(r.email_verified_at),
   failedLoginCount: toNum(r.failed_login_count), lockedUntil: toDateOrNull(r.locked_until),
+  createdAt: toDate(r.created_at), deletionRequestedAt: toDateOrNull(r.deletion_requested_at),
 });
-const USER_COLS = `id, email, password_hash, role, status, email_verified_at, failed_login_count, locked_until`;
+const USER_COLS = `id, email, password_hash, role, status, email_verified_at, failed_login_count, locked_until, created_at, deletion_requested_at`;
 
 export type RotateResult =
   | { status: 'OK'; userId: string; familyId: string }
@@ -60,6 +61,14 @@ export class AuthStore {
 
   async recordLoginSuccess(userId: string, now: Date): Promise<void> {
     await this.db.exec(`UPDATE users SET failed_login_count = 0, locked_until = NULL, last_login_at = $2 WHERE id = $1`, [userId, now]);
+  }
+
+  /** Starts the deletion grace period. The user can still sign in to cancel; a retention job hard-deletes later (not yet implemented). */
+  async requestDeletion(userId: string, now: Date): Promise<void> {
+    await this.db.exec(`UPDATE users SET status = 'PENDING_DELETION', deletion_requested_at = $2 WHERE id = $1 AND status = 'ACTIVE'`, [userId, now]);
+  }
+  async cancelDeletion(userId: string): Promise<boolean> {
+    return (await this.db.exec(`UPDATE users SET status = 'ACTIVE', deletion_requested_at = NULL WHERE id = $1 AND status = 'PENDING_DELETION'`, [userId])) === 1;
   }
 
   async setPasswordHash(userId: string, hash: string): Promise<void> {

@@ -34,6 +34,8 @@ export interface ResetPasswordRequest { token: string; password: string }
 export interface ChangePasswordRequest { currentPassword: string; newPassword: string }
 export interface DeleteAccountRequest { password: string }
 export interface AuthResponse { user: UserDto }
+/** Registration never reveals whether the address was already in use. */
+export interface RegisterResponse { status: 'VERIFICATION_SENT' }
 
 /* -------------------------------------------------------------- settings */
 export interface SettingsDto {

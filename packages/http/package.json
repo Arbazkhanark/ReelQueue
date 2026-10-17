@@ -1,0 +1,15 @@
+{
+  "name": "@reelqueue/http",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Framework-free HTTP layer: router, validation, auth/CSRF/CORS/rate-limit, all /v1 routes over the services. NestJS (apps/api) and the node:http server both adapt it.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "tsx --test \"test/**/*.test.ts\""
+  },
+  "dependencies": { "@reelqueue/core": "workspace:*", "@reelqueue/db": "workspace:*", "@reelqueue/services": "workspace:*", "@reelqueue/shared": "workspace:*" },
+  "devDependencies": { "@types/node": "^22.0.0", "tsx": "^4.20.0", "typescript": "~6.0.3" }
+}

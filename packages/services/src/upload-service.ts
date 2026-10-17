@@ -100,6 +100,29 @@ export class UploadService {
     return this.result(fresh);
   }
 
+  /** The browser reports that its PUT failed. Marks the video FAILED (releasing quota) and removes any partial object. */
+  async failClientUpload(userId: string, videoId: string): Promise<void> {
+    const v = await this.store.getVideo(userId, videoId);
+    if (!v) throw new AppError('NOT_FOUND', 'Video not found.');
+    if (await this.store.markDead(userId, videoId, 'CLIENT_UPLOAD_FAILED', 'FAILED')) await this.purge({ id: v.id, userId, storageKey: v.storageKey });
+  }
+
+  async updateCaption(userId: string, videoId: string, caption: string | null): Promise<VideoRow> {
+    if (caption !== null && (typeof caption !== 'string' || [...caption].length > 2200)) throw new AppError('VALIDATION_FAILED', 'Invalid input.', [{ field: 'caption', message: 'At most 2200 characters.' }]);
+    const v = await this.store.updateCaption(userId, videoId, caption);
+    if (!v) throw new AppError('NOT_FOUND', 'Video not found.');
+    return v;
+  }
+
+  /** Short-lived signed URL for the dashboard player. Only for videos that passed validation. */
+  async preview(userId: string, videoId: string): Promise<{ url: string; expiresAt: Date }> {
+    const v = await this.store.getVideo(userId, videoId);
+    if (!v) throw new AppError('NOT_FOUND', 'Video not found.');
+    if (v.status !== 'READY') throw new AppError('INVALID_STATE', 'The video is not ready.');
+    const ttl = 300;
+    return { url: await this.storage.presignDownload(v.storageKey, { expiresSeconds: ttl }), expiresAt: new Date(this.clock.now().getTime() + ttl * 1000) };
+  }
+
   async deleteVideo(userId: string, videoId: string): Promise<void> {
     const r = await this.store.softDelete(userId, videoId, this.clock.now());
     if (!r.ok) throw new AppError(r.code === 'NOT_FOUND' ? 'NOT_FOUND' : 'VIDEO_IN_USE', r.code === 'NOT_FOUND' ? 'Video not found.' : 'This video is part of a scheduled or running publishing job.');

@@ -11,8 +11,11 @@
     "test:core": "pnpm --filter @reelqueue/core test",
     "typecheck:core": "pnpm --filter @reelqueue/core typecheck",
     "db:verify": "./scripts/verify-db.sh",
-    "test": "pnpm test:core",
-    "typecheck": "pnpm typecheck:core"
+    "test": "pnpm test:libs",
+    "typecheck": "pnpm typecheck:libs",
+    "build:libs": "pnpm -r --filter @reelqueue/core --filter @reelqueue/shared --filter @reelqueue/db --filter @reelqueue/services --filter @reelqueue/integrations --filter @reelqueue/http build",
+    "test:libs": "pnpm -r --filter @reelqueue/core --filter @reelqueue/integrations --filter @reelqueue/db --filter @reelqueue/services --filter @reelqueue/http --workspace-concurrency=1 test",
+    "typecheck:libs": "pnpm -r --filter @reelqueue/core --filter @reelqueue/shared --filter @reelqueue/integrations --filter @reelqueue/db --filter @reelqueue/services --filter @reelqueue/http typecheck"
   },
   "devDependencies": {
     "typescript": "~6.0.3"

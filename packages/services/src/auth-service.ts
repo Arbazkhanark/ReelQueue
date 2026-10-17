@@ -65,8 +65,12 @@ export class AuthService {
   }
 
   async signup(emailIn: string, password: string): Promise<void> {
-    const email = this.normEmail(emailIn);
-    this.assertPassword(password, email);
+    // Report email and password problems together so a form can show them all at once.
+    const details: { field: string; message: string }[] = [];
+    const email = emailIn.trim().toLowerCase();
+    if (!EMAIL.test(email)) details.push({ field: 'email', message: 'Enter a valid email address.' });
+    for (const i of checkPassword(password, EMAIL.test(email) ? { email } : {})) details.push({ field: 'password', message: ISSUE_TEXT[i] });
+    if (details.length) throw new AppError('VALIDATION_FAILED', 'Invalid input.', details);
     const hash = await this.hasher.hash(password);
     const created = await this.store.createUser(email, hash);
     if (!created.ok) return; // taken: silent, indistinguishable (the owner is not emailed here; add a "someone tried" notice later)
@@ -104,7 +108,7 @@ export class AuthService {
       throw new AppError('INVALID_CREDENTIALS', 'Incorrect email or password.');
     }
     if (user.status === 'SUSPENDED') throw new AppError('ACCOUNT_SUSPENDED', 'This account is suspended.');
-    if (user.status !== 'ACTIVE') throw new AppError('INVALID_CREDENTIALS', 'Incorrect email or password.');
+    if (user.status !== 'ACTIVE' && user.status !== 'PENDING_DELETION') throw new AppError('INVALID_CREDENTIALS', 'Incorrect email or password.');
     if (this.cfg.requireVerifiedEmail && !user.emailVerifiedAt) throw new AppError('EMAIL_NOT_VERIFIED', 'Verify your email address to sign in.');
     if (this.hasher.needsRehash(user.passwordHash)) await this.store.setPasswordHash(user.id, await this.hasher.hash(password));
     await this.store.recordLoginSuccess(user.id, now);
@@ -119,7 +123,7 @@ export class AuthService {
     const r = await this.store.rotateRefreshToken({ oldHash: hashToken(rawRefresh), newHash: hashToken(fresh.refreshToken), newExpiresAt: fresh.refreshExpiresAt, now, graceMs: this.cfg.refreshGraceMs, ...ctx });
     if (r.status !== 'OK') throw new AppError('UNAUTHENTICATED', 'Session expired. Sign in again.');
     const user = await this.store.findById(r.userId);
-    if (!user || user.status !== 'ACTIVE') {
+    if (!user || (user.status !== 'ACTIVE' && user.status !== 'PENDING_DELETION')) {
       await this.store.revokeAllForUser(r.userId, now);
       throw new AppError('UNAUTHENTICATED', 'Session expired. Sign in again.');
     }
@@ -137,7 +141,7 @@ export class AuthService {
     const v = verifyJwt(accessToken, this.cfg.jwtSecret, this.clock.now(), { issuer: this.cfg.issuer });
     if (!v.ok) throw new AppError('UNAUTHENTICATED', 'Sign in required.');
     const user = await this.store.findById(v.claims.sub);
-    if (!user || user.status !== 'ACTIVE') throw new AppError('UNAUTHENTICATED', 'Sign in required.');
+    if (!user || (user.status !== 'ACTIVE' && user.status !== 'PENDING_DELETION')) throw new AppError('UNAUTHENTICATED', 'Sign in required.');
     return { userId: user.id, role: user.role };
   }
 
@@ -164,5 +168,27 @@ export class AuthService {
     this.assertPassword(next, user.email);
     await this.store.setPasswordHash(userId, await this.hasher.hash(next));
     await this.store.revokeAllForUser(userId, this.clock.now());
+  }
+
+  async getUser(userId: string): Promise<UserRow> {
+    const u = await this.store.findById(userId);
+    if (!u) throw new AppError('UNAUTHENTICATED', 'Sign in required.');
+    return u;
+  }
+
+  async verifyPassword(userId: string, password: string): Promise<void> {
+    const u = await this.getUser(userId);
+    if (!(await this.hasher.verify(password, u.passwordHash))) throw new AppError('INVALID_CREDENTIALS', 'Password is incorrect.');
+  }
+
+  /** Grace-period deletion: live cycles are stopped by the caller first; sessions are revoked, sign-in stays possible to cancel. */
+  async requestDeletion(userId: string): Promise<UserRow> {
+    await this.store.requestDeletion(userId, this.clock.now());
+    await this.store.revokeAllForUser(userId, this.clock.now());
+    return this.getUser(userId);
+  }
+  async cancelDeletion(userId: string): Promise<UserRow> {
+    await this.store.cancelDeletion(userId);
+    return this.getUser(userId);
   }
 }

@@ -88,6 +88,11 @@ export class VideoStore {
     return { ...usage, bytesTotalHeld: usage.bytesUsed + usage.bytesReserved };
   }
 
+  async updateCaption(userId: string, videoId: string, caption: string | null): Promise<VideoRow | null> {
+    const rows = await this.db.query(`UPDATE videos SET caption = $3 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL RETURNING ${COLS}`, [videoId, userId, caption]);
+    return rows[0] ? mapVideo(rows[0]) : null;
+  }
+
   /** Informational (UI shows "validating"); completion does not depend on it, so a crash after it loses nothing. */
   async markValidating(userId: string, videoId: string): Promise<void> {
     await this.db.exec(`UPDATE videos SET status = 'VALIDATING' WHERE id = $1 AND user_id = $2 AND status = 'PENDING_UPLOAD'`, [videoId, userId]);
