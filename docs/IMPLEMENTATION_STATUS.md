@@ -16,7 +16,7 @@ could not be installed. Verification here uses Node 22, global `tsc` 6.0.3, `tsx
 | Shared contract typecheck | `cd packages/shared && tsc -p tsconfig.json --noEmit` | clean |
 | Integrations (SigV4, S3 client, ffprobe on a real ffmpeg-generated mp4, Meta provider on a fake HTTP client) | `cd packages/integrations && tsx --test test/*.test.ts` | **19 / 19 pass**, typecheck clean |
 | DB adapters on real PostgreSQL 16 (job store claims across separate psql sessions, scheduler store, auth store) | `cd packages/db && tsx --test test/*.test.ts` | **33 / 33 pass** (incl. 10 AuthStore tests: concurrent signup, lockout, refresh rotation/reuse/grace, single-use tokens, atomic password reset) |
-| Services (SchedulerRunner, virtual-time e2e on real Postgres) | `cd packages/services && tsx --test test/*.test.ts` | **11 / 11 pass** |
+| Services (SchedulerRunner virtual-time e2e + AuthService, on real Postgres) | `cd packages/services && tsx --test test/*.test.ts` | **20 / 20 pass** (11 scheduler-runner + 9 AuthService: enumeration-safe signup/reset, lockout, verified-email gate, refresh rotation + reuse revocation, suspension takes effect immediately, password-hash upgrade) |
 | SQL schema + invariants | `PGDATABASE=reelqueue_verify ./scripts/verify-db.sh` | **18 / 18 pass** ("DB verification passed") |
 
 The db/services tests need a local PostgreSQL (they create `reelqueue_dbtest`); they skip if none is available.
@@ -32,7 +32,7 @@ field names and error-code mapping are UNVERIFIED.
 | Database schema | **VERIFIED** | `0001_init.sql`, 12 tables, 18 invariants |
 | API contract (`packages/shared`) | VERIFIED (typecheck only) | DTOs, error codes, route table; written by an earlier session, preserved |
 | C Storage | partly VERIFIED | core upload planning/validation, SigV4, S3 client (presign/HEAD/DELETE vs fake fetch), ffprobe runner: **VERIFIED**. NOT done: upload-session application service, real R2 round-trip (needs credentials) |
-| B Backend API (NestJS) | NOT STARTED as framework code | DB schema + stores exist and are verified; no controllers/guards/entities/Swagger yet. core auth primitives (scrypt hasher, password policy, HS256 JWT, cookies, rate limiter) and `AuthStore` (users, refresh rotation + reuse detection, reset/verify tokens) VERIFIED; auth SERVICE (login/signup/refresh orchestration) and Nest wiring NOT written |
+| B Backend API (NestJS) | NOT STARTED as framework code | DB schema + stores exist and are verified; no controllers/guards/entities/Swagger yet. core auth primitives (scrypt hasher, password policy, HS256 JWT, cookies, rate limiter) and `AuthStore` (users, refresh rotation + reuse detection, reset/verify tokens) VERIFIED; `AuthService` (signup/verify/login/refresh/logout/authenticate/reset/change-password) VERIFIED on real Postgres; Nest controllers/guards/wiring NOT written |
 | D Worker + scheduler | partly VERIFIED | `PgJobStore`, `SchedulerStore`, `SchedulerRunner` verified on real Postgres incl. duplicate delivery, Redis loss, lost publish response, worker crash, quota exhaustion, stop, expiry. BullMQ wrapper (`apps/worker`) NOT written |
 | E Instagram provider | partly VERIFIED | mock provider VERIFIED; `MetaInstagramProvider` written, tested ONLY against a fake HTTP client (shapes UNVERIFIED); OAuth connect flow + token store/refresh service NOT written |
 | F Dashboard (`apps/web`) | partly UNVERIFIED | lib/components + unit tests exist from another session (never run by me); **no pages yet** |
@@ -44,3 +44,4 @@ field names and error-code mapping are UNVERIFIED.
 * 2026-10-17: restarted PostgreSQL, re-ran all checks above (results in table). Committed checkpoint `b264dcd`.
 * 2026-10-17 (session 4): confirmed the psql adapter + tests were complete and committed (`636a5e0`, `1b7310e`); added core
   uploads (`d0b153b`), S3 client + ffprobe (`edc7782`), Meta provider + fake-HTTP tests, core auth primitives, `AuthStore`. All counts in the table above.
+* 2026-10-17 (session 4, later): added `AuthService` + 9 tests. NOTE: tests that need PostgreSQL HANG (event loop drains) rather than fail if the server is down; start it first (`pg_ctlcluster 16 main start`, or `docker compose up -d postgres`).
