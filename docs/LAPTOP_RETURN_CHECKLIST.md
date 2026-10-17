@@ -34,7 +34,7 @@ PGDATABASE=reelqueue_verify ./scripts/verify-db.sh     # DESTRUCTIVE to that DB;
 ## 5. Verification commands (record every failure)
 ```bash
 pnpm -r typecheck
-pnpm -r test                      # last observed here: core 112, integrations 19, db 23, services 11 (db/services need local Postgres)
+pnpm -r test                      # last observed here: core 123, integrations 19, db 23, services 11 (db/services need local Postgres)
 pnpm --filter @reelqueue/web build
 ```
 
