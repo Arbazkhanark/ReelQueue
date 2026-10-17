@@ -85,8 +85,8 @@ Legend: `[x]` run & verified here · `[~]` written, **not run** · `[ ]` not sta
 - [x] **M2 Database schema:** `0001_init.sql` applied on PG 16; 18 invariants pass
 - [~] **M2b** Repo scaffolding: `.env.example`, `infra/docker-compose.yml`, CI workflow, `scripts/verify-db.sh` (the script is run; compose and CI are not)
 - [!] **M3 Workspace + API foundation:** Nest app, TypeORM entities/migration wrapper, config, Pino, health, Swagger
-- [!] **M4 Auth + tenancy:** register/login/refresh/logout, verify, reset, RBAC, rate limits, ownership guards + isolation tests
-- [!] **M5 Storage + uploads:** `StorageProvider` (S3/R2), presign, init/complete, validation, quota, cleanup
+- [~] **M4 Auth + tenancy:** `AuthService` + `AuthStore` + crypto primitives VERIFIED on real Postgres (register/verify/login/refresh/logout/reset/lockout/rotation); Nest controllers, guards, RBAC wiring NOT written
+- [~] **M5 Storage + uploads:** `StorageProvider` S3/R2 client, `VideoStore`, `UploadService` VERIFIED (real Postgres + fakes); HTTP endpoints and a real R2 round-trip NOT done
 - [!] **M6 Worker + scheduler:** Postgres `JobStore`, BullMQ queues, tick/exec processors, sweeper, expiry, graceful shutdown
 - [!] **M7 Instagram:** `MetaProvider` (OAuth, container, poll, publish, quota), token refresh job, mock mode wiring
 - [!] **M8 Cycle API:** start/pause/resume/stop, upcoming, history, retry, loop toggle
