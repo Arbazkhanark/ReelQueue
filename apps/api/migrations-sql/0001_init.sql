@@ -24,7 +24,7 @@ $$ LANGUAGE plpgsql;
 CREATE TABLE users (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email              text NOT NULL,
-  password_hash      text NOT NULL,                       -- argon2id encoded hash
+  password_hash      text NOT NULL,                       -- self-describing KDF hash (scrypt by default; see core PasswordHasher)
   role               text NOT NULL DEFAULT 'USER'   CHECK (role   IN ('USER','ADMIN')),
   status             text NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','SUSPENDED','PENDING_DELETION')),
   email_verified_at  timestamptz,

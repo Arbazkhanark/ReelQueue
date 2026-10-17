@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { PsqlPool, postgresAvailable } from './psql-executor';
 import type { SqlExecutor } from '../../src/sql';
 
-export const TEST_DB = process.env.REELQUEUE_TEST_DB ?? 'reelqueue_dbtest';
+// One scratch database PER PROCESS (node --test runs files in parallel processes) and dropped on exit.
+export const TEST_DB = `${process.env.REELQUEUE_TEST_DB ?? 'reelqueue_dbtest'}_${process.pid}`;
 const SQL_DIR = join(__dirname, '../../../../apps/api/migrations-sql');
 
 /** Creates (or recreates) the scratch database, applies every migration, returns a pool. Returns null if Postgres is unavailable. */
@@ -15,6 +16,9 @@ export async function freshDatabase(): Promise<PsqlPool | null> {
   for (const f of readdirSync(SQL_DIR).filter((n) => /^\d{4}_.*\.sql$/.test(n)).sort()) {
     execFileSync('psql', ['-X', '-q', '-v', 'ON_ERROR_STOP=1', '-d', TEST_DB, '-f', join(SQL_DIR, f)]);
   }
+  process.on('exit', () => {
+    try { execFileSync('psql', ['-X', '-q', '-d', 'postgres', '-c', `DROP DATABASE IF EXISTS ${TEST_DB} WITH (FORCE)`]); } catch { /* best effort */ }
+  });
   return new PsqlPool(TEST_DB, 8);
 }
 
