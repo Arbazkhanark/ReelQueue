@@ -34,15 +34,23 @@ PGDATABASE=reelqueue_verify ./scripts/verify-db.sh     # DESTRUCTIVE to that DB;
 ## 5. Verification commands (record every failure)
 ```bash
 pnpm -r typecheck
-pnpm -r test                      # core 106, integrations, shared, web pure tests
+pnpm -r test                      # last observed here: core 112, integrations 19, db 23, services 11 (db/services need local Postgres)
 pnpm --filter @reelqueue/web build
 ```
+
+## 5b. Expected-to-work before any framework code (already green on the build workspace)
+```bash
+pnpm test:core && pnpm typecheck:core
+PGDATABASE=reelqueue_verify ./scripts/verify-db.sh
+```
+If these fail on your machine the cause is environment (Node/Postgres version), not the missing framework code.
 
 ## 6. Local start, mock mode, Meta, deployment
 Filled in as the corresponding code lands; see `docs/IMPLEMENTATION_STATUS.md` for what exists.
 
 ## 10. Known failures / unverified / manual steps
 - All framework code (Nest, TypeORM entities, BullMQ processors, Next pages) is UNVERIFIED until step 5 passes.
+- `MetaInstagramProvider` has only run against a fake HTTP client; verify every endpoint/field/error code against a real test account before `INSTAGRAM_PROVIDER=meta`.
 - Meta: OAuth endpoints, token lifetimes, Reel media spec, dev-mode behaviour are unverified (`docs/INSTAGRAM_SETUP.md`).
 - Meta App Review / Advanced Access is required to serve users other than yourself and cannot be done from code.
 - R2 bucket CORS (PUT from your web origin) must be configured manually.
