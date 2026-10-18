@@ -12,7 +12,7 @@ describe('production wiring adapters', () => {
     const m = new StorageMediaUrlProvider({ getStorageKeyForPublishing: async (id) => (id === 'v1' ? 'k/v1.mp4' : null) }, { presignDownload: async (k, o) => { calls.push([k, o]); return `https://x/${k}`; } });
     assert.equal(await m.getFetchUrl('v1', 600), 'https://x/k/v1.mp4');
     assert.deepEqual(calls, [['k/v1.mp4', { expiresSeconds: 600 }]]);
-    await assert.rejects(m.getFetchUrl('gone', 60), /not available/);
+    await assert.rejects(m.getFetchUrl('gone', 60), (e: Error) => e.name === 'MediaUnavailableError' && /not available/.test(e.message));
   });
   it('token resolver: decrypts for META/ACTIVE; fails closed otherwise; error text never contains the token', async () => {
     const r = (a: unknown) => new DbTokenResolver({ getCredentials: async () => a as never }, cipher).resolve('x');

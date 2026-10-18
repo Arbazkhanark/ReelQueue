@@ -1,6 +1,6 @@
 import type { Clock, Rng } from './clock';
 import { effectiveStatus, type CycleState } from './cycle';
-import { LeaseLostError, ProviderError } from './errors';
+import { LeaseLostError, MediaUnavailableError, ProviderError } from './errors';
 import type { JobStatus, PublishJobRecord } from './jobs';
 import { isValidQuota, remainingQuota } from './quota';
 import { DEFAULT_BACKOFF, decideOnError, type BackoffConfig, type ExecutionStep, type PauseReason } from './retry';
@@ -290,7 +290,14 @@ export class PublishExecutor {
 
   private async createContainer(run: Run): Promise<ExecuteOutcome | null> {
     await this.upd(run, { status: 'CREATING_CONTAINER' });
-    const videoUrl = await this.media.getFetchUrl(run.ctx.videoId, this.cfg.mediaUrlTtlSeconds);
+    let videoUrl: string;
+    try {
+      videoUrl = await this.media.getFetchUrl(run.ctx.videoId, this.cfg.mediaUrlTtlSeconds);
+    } catch (err) {
+      if (!(err instanceof MediaUnavailableError)) throw err; // transient storage failure: lease expires, redelivered
+      await this.upd(run, { status: 'CANCELLED', failureReason: 'VIDEO_UNAVAILABLE', releaseLease: true });
+      return { kind: 'CANCELLED' };
+    }
     const { containerId } = await this.call(run, 'CREATE_CONTAINER', () =>
       run.provider.createReelContainer(run.ctx.accountId, {
         videoUrl,

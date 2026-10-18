@@ -178,14 +178,14 @@ export interface Harness {
   addJob(id: string, over?: Partial<PublishJobRecord>): PublishJobRecord;
 }
 
-export function makeHarness(opts: { config?: Partial<ExecutorConfig>; real?: boolean } = {}): Harness {
+export function makeHarness(opts: { config?: Partial<ExecutorConfig>; real?: boolean; media?: MediaUrlProvider } = {}): Harness {
   const clock = new FakeClock(T0);
   const store = new InMemoryJobStore(() => clock.now());
   const provider = new MockInstagramProvider(() => clock.now());
   const resolver: ProviderResolver = {
     resolve: (kind) => (opts.real && kind === 'META' ? new FakeRealProvider(provider) : provider),
   };
-  const media: MediaUrlProvider = {
+  const media: MediaUrlProvider = opts.media ?? {
     getFetchUrl: async (videoId, ttl) => `https://signed.example.test/${videoId}.mp4?ttl=${ttl}&sig=test`,
   };
   const executor = new PublishExecutor({

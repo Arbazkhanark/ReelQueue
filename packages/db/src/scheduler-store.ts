@@ -168,7 +168,9 @@ export class SchedulerStore {
       const cycle = mapCycle(locked[0]);
 
       const videos = (
-        await tx.query(`SELECT id, position FROM videos WHERE user_id = $1 AND status = 'READY' AND deleted_at IS NULL`, [cycle.userId])
+        // FOR SHARE: waits for a concurrent soft-delete of the same row and then re-evaluates `deleted_at IS NULL`, so a job can never be
+        // created for a video that is being deleted; a delete that starts after this lock waits for this transaction and sees the new job.
+        await tx.query(`SELECT id, position FROM videos WHERE user_id = $1 AND status = 'READY' AND deleted_at IS NULL FOR SHARE`, [cycle.userId])
       ).map((v) => ({ id: String(v.id), position: toNum(v.position) }));
       const unresolved = toNum(
         (

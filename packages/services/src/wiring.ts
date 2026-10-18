@@ -1,4 +1,4 @@
-import { DecryptionError, type InstagramProvider, type MediaUrlProvider, type ProviderResolver, type StorageProvider, type TokenCipher } from '@reelqueue/core';
+import { DecryptionError, MediaUnavailableError, type InstagramProvider, type MediaUrlProvider, type ProviderResolver, type StorageProvider, type TokenCipher } from '@reelqueue/core';
 import type { MetaCredentials, TokenResolver } from '@reelqueue/integrations';
 
 /** Production adapters that glue stores to the core/integration ports. No test doubles here. */
@@ -10,7 +10,7 @@ export class StorageMediaUrlProvider implements MediaUrlProvider {
   constructor(private readonly videos: { getStorageKeyForPublishing(videoId: string): Promise<string | null> }, private readonly storage: Pick<StorageProvider, 'presignDownload'>) {}
   async getFetchUrl(videoId: string, ttlSeconds: number): Promise<string> {
     const key = await this.videos.getStorageKeyForPublishing(videoId);
-    if (!key) throw new Error(`Video ${videoId} is not available for publishing (not READY or deleted)`);
+    if (!key) throw new MediaUnavailableError(`Video ${videoId} is not available for publishing (not READY or deleted)`);
     return this.storage.presignDownload(key, { expiresSeconds: ttlSeconds });
   }
 }

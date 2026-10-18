@@ -1,4 +1,4 @@
-import { toDate, toDateOrNull, toNum, toStrOrNull, type Row, type SqlExecutor } from './sql';
+import { isUniqueViolation, toDate, toDateOrNull, toNum, toStrOrNull, type Row, type SqlExecutor } from './sql';
 
 /* ------------------------------------------------------------------ settings */
 export interface SettingsRow {
@@ -69,6 +69,62 @@ export class AccountStore {
       [userId, `mock_${userId.slice(0, 8)}_${username.toLowerCase()}_${Date.now().toString(36)}`, username, tokenPlaceholder]);
     return mapAccount(rows[0]!);
   }
+  /**
+   * Stores a freshly authorised REAL account (token already encrypted by the caller). A real IG account can be live for one
+   * user only: another user's live row gives IN_USE. Re-connecting your own account updates it in place (new token, CONNECTED).
+   */
+  async upsertMeta(a: { userId: string; providerAccountId: string; username: string | null; accountType: string | null; scopes: string[]; tokenEnc: string; issuedAt: Date; expiresAt: Date }):
+    Promise<{ ok: true; account: AccountRow; created: boolean } | { ok: false; code: 'IN_USE' }> {
+    const attempt = () => this.db.transaction(async (tx) => {
+      const live = (await tx.query(`SELECT id, user_id FROM instagram_accounts WHERE provider = 'META' AND provider_account_id = $1 AND status <> 'DISCONNECTED' FOR UPDATE`, [a.providerAccountId]))[0];
+      if (live && String(live.user_id) !== a.userId) return { ok: false as const, code: 'IN_USE' as const };
+      if (live) {
+        const r = await tx.query(
+          `UPDATE instagram_accounts SET username = $3, account_type = $4, granted_scopes = $5, access_token_enc = $6, token_issued_at = $7, token_expires_at = $8,
+             last_refreshed_at = $7, status = 'CONNECTED', last_error_code = NULL, token_refresh_claim_until = NULL
+           WHERE id = $1 AND user_id = $2 RETURNING ${ACC_COLS}`, [live.id, a.userId, a.username, a.accountType, a.scopes, a.tokenEnc, a.issuedAt, a.expiresAt]);
+        return { ok: true as const, account: mapAccount(r[0]!), created: false };
+      }
+      const r = await tx.query(
+        `INSERT INTO instagram_accounts (user_id, provider, provider_account_id, username, account_type, granted_scopes, access_token_enc, token_issued_at, token_expires_at, last_refreshed_at)
+         VALUES ($1, 'META', $2, $3, $4, $5, $6, $7, $8, $7) RETURNING ${ACC_COLS}`, [a.userId, a.providerAccountId, a.username, a.accountType, a.scopes, a.tokenEnc, a.issuedAt, a.expiresAt]);
+      return { ok: true as const, account: mapAccount(r[0]!), created: true };
+    });
+    try { return await attempt(); }
+    catch (err) { if (isUniqueViolation(err)) return { ok: false, code: 'IN_USE' }; throw err; } // two users raced for the same IG account
+  }
+
+  /** Accounts whose token needs attention: expiring within `leadMs`, or already past expiry. System sweep. */
+  async listTokenCandidates(now: Date, leadMs: number, limit = 50): Promise<{ id: string; userId: string; providerAccountId: string; tokenIssuedAt: Date; tokenExpiresAt: Date }[]> {
+    const rows = await this.db.query(
+      `SELECT id, user_id, provider_account_id, token_issued_at, token_expires_at FROM instagram_accounts
+        WHERE provider = 'META' AND status = 'CONNECTED' AND token_expires_at IS NOT NULL AND token_issued_at IS NOT NULL
+          AND token_expires_at <= $1 AND (token_refresh_claim_until IS NULL OR token_refresh_claim_until <= $2)
+        ORDER BY token_expires_at LIMIT $3`, [new Date(now.getTime() + leadMs), now, limit]);
+    return rows.map((r) => ({ id: String(r.id), userId: String(r.user_id), providerAccountId: String(r.provider_account_id), tokenIssuedAt: toDate(r.token_issued_at), tokenExpiresAt: toDate(r.token_expires_at) }));
+  }
+  /** Lease so two workers never refresh the same account at once. Returns the current ciphertext when the claim was won. */
+  async claimTokenRefresh(id: string, now: Date, leaseMs: number): Promise<string | null> {
+    const r = await this.db.query(
+      `UPDATE instagram_accounts SET token_refresh_claim_until = $2
+        WHERE id = $1 AND provider = 'META' AND status = 'CONNECTED' AND access_token_enc IS NOT NULL AND (token_refresh_claim_until IS NULL OR token_refresh_claim_until <= $3)
+        RETURNING access_token_enc`, [id, new Date(now.getTime() + leaseMs), now]);
+    return r[0] ? String(r[0].access_token_enc) : null;
+  }
+  /** Compare-and-set on the old ciphertext: a concurrent reconnect (new token) is never overwritten by a stale refresh. */
+  async applyRefreshedToken(id: string, oldTokenEnc: string, newTokenEnc: string, now: Date, expiresAt: Date): Promise<boolean> {
+    return (await this.db.exec(
+      `UPDATE instagram_accounts SET access_token_enc = $3, token_issued_at = $4, last_refreshed_at = $4, token_expires_at = $5, last_error_code = NULL, token_refresh_claim_until = NULL
+        WHERE id = $1 AND access_token_enc = $2 AND status = 'CONNECTED'`, [id, oldTokenEnc, newTokenEnc, now, expiresAt])) === 1;
+  }
+  async releaseTokenRefreshClaim(id: string, errorCode: string | null): Promise<void> {
+    await this.db.exec(`UPDATE instagram_accounts SET token_refresh_claim_until = NULL, last_error_code = COALESCE($2, last_error_code) WHERE id = $1`, [id, errorCode]);
+  }
+  /** The user must re-authorise. Cycles notice through the account status (and the executor's own AUTH_EXPIRED handling). */
+  async markNeedsAuth(id: string, status: 'REAUTH_REQUIRED' | 'PERMISSION_REVOKED', errorCode: string): Promise<void> {
+    await this.db.exec(`UPDATE instagram_accounts SET status = $2, last_error_code = $3, token_refresh_claim_until = NULL WHERE id = $1 AND status = 'CONNECTED'`, [id, status, errorCode]);
+  }
+
   async disconnect(userId: string, id: string, now: Date): Promise<{ ok: true; account: AccountRow } | { ok: false; code: 'NOT_FOUND' | 'CYCLE_ACTIVE' }> {
     return this.db.transaction(async (tx) => {
       const acc = await tx.query(`SELECT id FROM instagram_accounts WHERE id = $1 AND user_id = $2 FOR UPDATE`, [id, userId]);

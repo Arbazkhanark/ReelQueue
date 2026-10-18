@@ -61,3 +61,15 @@ export class InvalidTransitionError extends Error {
     this.name = 'InvalidTransitionError';
   }
 }
+
+/**
+ * Thrown by a MediaUrlProvider when the video cannot be published any more (deleted, no longer READY, object gone).
+ * This is a PERMANENT condition for the job: the executor cancels it instead of treating it as an infrastructure error
+ * (which would be redelivered forever). Transient storage failures must throw something else.
+ */
+export class MediaUnavailableError extends Error {
+  constructor(message = 'The video is no longer available for publishing') {
+    super(message);
+    this.name = 'MediaUnavailableError';
+  }
+}

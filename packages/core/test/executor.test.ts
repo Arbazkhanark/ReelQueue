@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { ProviderError, type ExecuteOutcome } from '../src';
+import { MediaUnavailableError, ProviderError, type ExecuteOutcome } from '../src';
 import { makeHarness, T0, type Harness } from './helpers/harness';
 
 const MIN = 60_000;
@@ -581,5 +581,24 @@ describe('per-account ordering and concurrency', () => {
     const [a, b] = await Promise.all([h.executor.execute('a1', 'w1'), h.executor.execute('b1', 'w2')]);
     assert.deepEqual(a, { kind: 'COMPLETED', status: 'SIMULATED' });
     assert.deepEqual(b, { kind: 'COMPLETED', status: 'SIMULATED' });
+  });
+});
+
+describe('unavailable media (video deleted after the job was created)', () => {
+  it('a MediaUnavailableError cancels the job permanently: no container, no publish, lease released, no redelivery loop', async () => {
+    const h = makeHarness({ media: { getFetchUrl: async () => { throw new MediaUnavailableError(); } } });
+    h.addCycle(); h.addJob('j1', { sequenceNo: 1 });
+    const out = await h.executor.execute('j1', 'w1');
+    assert.deepEqual(out, { kind: 'CANCELLED' });
+    const job = h.store.get('j1');
+    assert.equal(job.status, 'CANCELLED'); assert.equal(job.failureReason, 'VIDEO_UNAVAILABLE'); assert.equal(job.leaseOwner, null);
+    assert.equal(h.provider.callCount('createReelContainer'), 0);
+    assert.equal(h.provider.publications.length, 0);
+  });
+  it('any other media-url error is an infrastructure error: it propagates (redelivery), the job is not cancelled', async () => {
+    const h = makeHarness({ media: { getFetchUrl: async () => { throw new Error('storage timeout'); } } });
+    h.addCycle(); h.addJob('j1', { sequenceNo: 1 });
+    await assert.rejects(h.executor.execute('j1', 'w1'), /storage timeout/);
+    assert.notEqual(h.store.get('j1').status, 'CANCELLED');
   });
 });

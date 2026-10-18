@@ -170,6 +170,26 @@ export class VideoStore {
     await this.db.exec(`UPDATE videos SET storage_deleted_at = $2 WHERE id = $1 AND storage_deleted_at IS NULL`, [videoId, now]);
   }
 
+  /**
+   * Retention: soft-deleted videos older than `cutoff` whose object is already gone get their personal data removed.
+   * No job references it -> the row is deleted; publishing history references it -> the row stays (history integrity) but the
+   * filename/caption are scrubbed and `purged_at` is set. Idempotent; safe to run concurrently (rows are locked SKIP LOCKED).
+   */
+  async purgeSoftDeleted(cutoff: Date, now: Date, limit = 200): Promise<{ deleted: number; scrubbed: number }> {
+    return this.db.transaction(async (tx) => {
+      const rows = await tx.query(
+        `SELECT v.id, EXISTS (SELECT 1 FROM publish_jobs j WHERE j.video_id = v.id) AS referenced FROM videos v
+          WHERE v.deleted_at IS NOT NULL AND v.deleted_at < $1 AND v.storage_deleted_at IS NOT NULL AND v.purged_at IS NULL
+          ORDER BY v.deleted_at LIMIT $2 FOR UPDATE OF v SKIP LOCKED`, [cutoff, limit]);
+      let deleted = 0, scrubbed = 0;
+      for (const r of rows) {
+        if (r.referenced) { await tx.exec(`UPDATE videos SET original_filename = '[deleted video]', caption = NULL, purged_at = $2 WHERE id = $1`, [r.id, now]); scrubbed++; }
+        else { await tx.exec(`DELETE FROM videos WHERE id = $1`, [r.id]); deleted++; }
+      }
+      return { deleted, scrubbed };
+    });
+  }
+
   /** Soft delete. Refused while a live publishing job references the video. */
   async softDelete(userId: string, videoId: string, now: Date): Promise<{ ok: true; storageKey: string } | { ok: false; code: 'NOT_FOUND' | 'VIDEO_IN_USE' }> {
     return this.db.transaction(async (tx) => {
