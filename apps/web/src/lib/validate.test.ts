@@ -40,8 +40,9 @@ test('validateEmail / validateNewPassword', () => {
   assert.equal(validateEmail('a@b.co'), null);
   assert.notEqual(validateEmail('nope'), null);
   assert.notEqual(validateEmail(''), null);
-  assert.equal(validateNewPassword('longenough1'), null);
+  assert.equal(validateNewPassword('long-enough-1'), null);
   assert.notEqual(validateNewPassword('short'), null);
+  assert.notEqual(validateNewPassword('elevenchars'), null, 'server minimum is 12');
 });
 test('safeNextPath blocks open redirects', () => {
   assert.equal(safeNextPath('/videos'), '/videos');

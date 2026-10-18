@@ -34,7 +34,7 @@ PGDATABASE=reelqueue_verify ./scripts/verify-db.sh     # DESTRUCTIVE to that DB;
 ## 5. Verification commands (record every failure)
 ```bash
 pnpm -r typecheck
-pnpm -r test                      # last observed here: core 123, integrations 19, db 33, services 38 (db/services/http need local Postgres)
+pnpm -r test                      # last observed here (2026-10-18): core 123, integrations 19, db 43, services 41, http 15, runtime 7, worker 6, web lib 65 = 319; db/services/http/runtime/worker need local Postgres
 pnpm --filter @reelqueue/web build
 ```
 
@@ -45,11 +45,22 @@ PGDATABASE=reelqueue_verify ./scripts/verify-db.sh
 ```
 If these fail on your machine the cause is environment (Node/Postgres version), not the missing framework code.
 
-## 6. Local start, mock mode, Meta, deployment
-Filled in as the corresponding code lands; see `docs/IMPLEMENTATION_STATUS.md` for what exists.
+## 6. Local start in mock mode (all of this is UNVERIFIED; first real run of the entrypoints)
+```bash
+pnpm install && pnpm build:libs
+# env (see packages/runtime/src/config.ts for every variable): DATABASE_URL, REDIS_URL, APP_ORIGINS=http://localhost:3000,
+# JWT_SECRET (>=32 chars), TOKEN_ENCRYPTION_KEYS=k1:<base64 32 bytes>, TOKEN_ENCRYPTION_ACTIVE_KEY_ID=k1,
+# S3_ENDPOINT/S3_BUCKET/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY (MinIO or R2), INSTAGRAM_PROVIDER=mock, MIGRATE_ON_BOOT=true
+node apps/api/dist/main.js        # applies migrations at boot, listens on :4000
+node apps/worker/dist/main.js     # BullMQ worker + sweeper
+pnpm --filter @reelqueue/web dev  # :3000
+```
+Expect to fix: bullmq/ioredis/pg typings in the two `main.ts` files (never compiled; `apps/worker/tsconfig*.json` exclude `main.ts` until deps exist - remove the exclude), and any React/Next compile errors in `apps/web/src/app/**` (never built).
+Storage CORS must allow PUT from the web origin. The `LogMailer` prints the verification link to the API log (the only way to verify an email in dev).
 
 ## 10. Known failures / unverified / manual steps
-- All framework code (Nest, TypeORM entities, BullMQ processors, Next pages) is UNVERIFIED until step 5 passes.
+- All framework code (BullMQ/ioredis/pg entrypoints `apps/api/src/main.ts` and `apps/worker/src/main.ts`, Next pages) is UNVERIFIED until step 5 passes. No Nest/TypeORM code exists (see ADR deviation in IMPLEMENTATION_STATUS).
+- Production cannot start yet: no real mail transport, no Meta OAuth connect/callback. Mock mode only.
 - `MetaInstagramProvider` has only run against a fake HTTP client; verify every endpoint/field/error code against a real test account before `INSTAGRAM_PROVIDER=meta`.
 - Meta: OAuth endpoints, token lifetimes, Reel media spec, dev-mode behaviour are unverified (`docs/INSTAGRAM_SETUP.md`).
 - Meta App Review / Advanced Access is required to serve users other than yourself and cannot be done from code.
