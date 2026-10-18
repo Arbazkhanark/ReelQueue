@@ -1,7 +1,7 @@
 import { MemoryRateLimitStore, RateLimiter, ScryptPasswordHasher, seededRng, TokenCipher, PublishExecutor, type Clock, type StorageProvider, type ProviderResolver, MockInstagramProvider, type InstagramProvider } from '@reelqueue/core';
-import { AccountStore, AuthStore, PgJobStore, QueryStore, SchedulerStore, SettingsStore, VideoStore, DEFAULT_TICK_CONFIG, type SqlExecutor } from '@reelqueue/db';
-import { MetaInstagramProvider, probeVideo, type HttpFn } from '@reelqueue/integrations';
-import { AccountService, AuthService, CompositeProviderResolver, CycleService, DbTokenResolver, DEFAULT_AUTH_CONFIG, DEFAULT_UPLOAD_CONFIG, MeService, ReadService, SchedulerRunner, SettingsService, StorageMediaUrlProvider, UploadFlow, UploadService, type Mailer, type MediaProbe, type WakeQueue } from '@reelqueue/services';
+import { AccountStore, AuthStore, PgJobStore, QueryStore, SchedulerStore, SettingsStore, VideoStore, DEFAULT_TICK_CONFIG, FallbackRateLimitStore, PgRateLimitStore, RetentionStore, type SqlExecutor } from '@reelqueue/db';
+import { MetaInstagramProvider, MetaOAuthClient, probeVideo, type HttpFn } from '@reelqueue/integrations';
+import { AccountService, AuthService, CompositeProviderResolver, CycleService, DbTokenResolver, DEFAULT_AUTH_CONFIG, DEFAULT_TOKEN_REFRESH_CONFIG, InstagramConnectService, OAUTH_STATE_MAX_AGE_MS, RetentionService, TokenRefreshService, DEFAULT_UPLOAD_CONFIG, MeService, ReadService, SchedulerRunner, SettingsService, StorageMediaUrlProvider, UploadFlow, UploadService, type Mailer, type MediaProbe, type WakeQueue } from '@reelqueue/services';
 import type { ApiDeps, ApiLogger } from '@reelqueue/http';
 import type { AppConfig } from './config';
 
@@ -42,12 +42,30 @@ export function compose(i: ComposeInput) {
   const cycles = new CycleService(sched, accounts, settingsStore, providers, i.queue, read, clock);
   const auth = new AuthService(new AuthStore(db), new ScryptPasswordHasher(), i.mailer, clock, { ...DEFAULT_AUTH_CONFIG, jwtSecret: cfg.jwtSecret });
 
+  // Meta-only: OAuth connect + token refresh. In mock mode neither exists (the mock-connect route is the only way to add accounts).
+  let instagramConnect: InstagramConnectService | undefined;
+  let tokenRefresh: TokenRefreshService | undefined;
+  const svcLog = { warn: (o: Record<string, unknown>, m: string) => i.logger.info({ ...o, level: 'warn' }, m) };
+  if (cfg.instagramProvider === 'meta') {
+    if (!cfg.meta || !cfg.oauth) throw new Error('META/OAuth config missing');
+    const oauth = new MetaOAuthClient({ appId: cfg.oauth.appId, appSecret: cfg.oauth.appSecret, redirectUri: cfg.oauth.redirectUri, scopes: cfg.oauth.scopes, graphVersion: cfg.meta.graphVersion, requestTimeoutMs: cfg.meta.requestTimeoutMs }, { clock, ...(i.metaHttp ? { http: i.metaHttp } : {}) });
+    instagramConnect = new InstagramConnectService(accounts, oauth, cipher, clock, { stateSecret: cfg.oauth.stateSecret, stateMaxAgeMs: OAUTH_STATE_MAX_AGE_MS, requiredScopes: cfg.oauth.scopes }, svcLog);
+    tokenRefresh = new TokenRefreshService(accounts, oauth, cipher, clock, DEFAULT_TOKEN_REFRESH_CONFIG, svcLog);
+  }
+
+  // Shared (cross-replica) rate limiting in PostgreSQL; if the table is unreachable it degrades to a per-replica memory store.
+  const rateStore = new PgRateLimitStore(db);
+  let degradedLogged = 0;
+  const limiter = new RateLimiter(new FallbackRateLimitStore(rateStore, new MemoryRateLimitStore(), () => { const t = clock.now().getTime(); if (t - degradedLogged > 60_000) { degradedLogged = t; i.logger.error({}, 'shared rate limiter unavailable; using per-replica memory fallback'); } }), () => clock.now());
+
+  const retention = new RetentionService(new RetentionStore(db), videos, i.storage, clock, { videoRetentionDays: cfg.retention.videoDays, accountGraceDays: cfg.retention.accountGraceDays }, svcLog);
+
   const apiDeps: Omit<ApiDeps, 'checks'> = {
     auth, uploads, read, cycles, clock, logger: i.logger,
-    config: { allowedOrigins: cfg.allowedOrigins, secureCookies: cfg.secureCookies, sameSite: 'Lax', accessTtlSeconds: DEFAULT_AUTH_CONFIG.accessTtlSeconds, refreshTtlSeconds: DEFAULT_AUTH_CONFIG.refreshTtlSeconds, globalPerMinute: 300 },
+    config: { allowedOrigins: cfg.allowedOrigins, secureCookies: cfg.secureCookies, sameSite: 'Lax', accessTtlSeconds: DEFAULT_AUTH_CONFIG.accessTtlSeconds, refreshTtlSeconds: DEFAULT_AUTH_CONFIG.refreshTtlSeconds, globalPerMinute: 300, webBaseUrl: cfg.webBaseUrl },
     flow: new UploadFlow(uploads, query, videos, read), settings: new SettingsService(settingsStore, accounts, read),
     accounts: new AccountService(accounts, sched, providers, read, clock, { mockMode }), me: new MeService(auth, sched, cycles),
-    limiter: new RateLimiter(new MemoryRateLimitStore(), () => clock.now()),
+    limiter, ...(instagramConnect ? { instagramConnect } : {}),
   };
-  return { apiDeps, runner, uploads, mockMode, providers };
+  return { apiDeps, runner, uploads, mockMode, providers, tokenRefresh, retention, rateStore };
 }

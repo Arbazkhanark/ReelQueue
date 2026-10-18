@@ -30,3 +30,32 @@ describe('loadConfig', () => {
     assert.ok(p.some((x) => /META_GRAPH_BASE_URL is required/.test(x)) && p.some((x) => /META_GRAPH_VERSION is required/.test(x)));
   });
 });
+
+describe('loadConfig: mail, OAuth, retention', () => {
+  const prodBase = { ...base, NODE_ENV: 'production', APP_ORIGINS: 'https://app.example.com', INSTAGRAM_PROVIDER: 'meta', META_GRAPH_BASE_URL: 'https://g', META_GRAPH_VERSION: 'v25.0', META_APP_ID: 'a', META_APP_SECRET: 's', META_REDIRECT_URI: 'https://api.example.com/v1/instagram/callback', OAUTH_STATE_SECRET: 'o'.repeat(40), MAIL_TRANSPORT: 'smtp', SMTP_HOST: 'smtp.example.com', MAIL_FROM: 'ReelQueue <no-reply@example.com>' };
+  it('a complete production config validates and yields the SMTP/OAuth/retention sections with safe defaults', () => {
+    const c = loadConfig(prodBase);
+    assert.deepEqual([c.mail.smtp?.security, c.mail.smtp?.port, c.webBaseUrl, c.retention.videoDays, c.retention.accountGraceDays], ['starttls', 587, 'https://app.example.com', 30, 14]);
+    assert.deepEqual(c.oauth?.scopes, ['instagram_business_basic', 'instagram_business_content_publish']);
+  });
+  it('smtp: requires host + valid From, credentials in pairs, never cleartext credentials, no security=none in production', () => {
+    assert.ok(problems({ ...prodBase, SMTP_HOST: '', MAIL_FROM: 'nonsense' }).filter((x) => /SMTP_HOST is required|MAIL_FROM/.test(x)).length === 2);
+    assert.ok(problems({ ...prodBase, SMTP_USER: 'u' }).some((x) => /set together/.test(x)));
+    assert.ok(problems({ ...prodBase, SMTP_SECURITY: 'none' }).some((x) => /not allowed in production/.test(x)));
+    assert.ok(problems({ ...base, MAIL_TRANSPORT: 'smtp', SMTP_HOST: 'mail.example.com', MAIL_FROM: 'a@example.com', SMTP_SECURITY: 'none', SMTP_USER: 'u', SMTP_PASS: 'p' }).some((x) => /cleartext credentials/.test(x)));
+    assert.equal(loadConfig({ ...prodBase, SMTP_SECURITY: 'tls' }).mail.smtp?.port, 465);
+    assert.ok(problems({ ...base, MAIL_TRANSPORT: 'sendgrid' }).some((x) => /must be "log" or "smtp"/.test(x)));
+  });
+  it('meta/OAuth: needs app id/secret/redirect, a 32+ char state secret different from the JWT secret, https redirect in production; never echoes the secrets', () => {
+    const p = problems({ ...prodBase, META_APP_ID: '', META_APP_SECRET: '', META_REDIRECT_URI: '', OAUTH_STATE_SECRET: 'short' });
+    for (const re of [/META_APP_ID is required/, /META_APP_SECRET is required/, /META_REDIRECT_URI is required/, /OAUTH_STATE_SECRET must be at least 32/]) assert.ok(p.some((x) => re.test(x)), String(re));
+    assert.ok(problems({ ...prodBase, OAUTH_STATE_SECRET: base.JWT_SECRET }).some((x) => /must differ from JWT_SECRET/.test(x)));
+    assert.ok(problems({ ...prodBase, META_REDIRECT_URI: 'http://api.example.com/cb' }).some((x) => /META_REDIRECT_URI must be https/.test(x)));
+    assert.ok(!problems({ ...prodBase, OAUTH_STATE_SECRET: 'short', META_APP_SECRET: 'LEAKME' }).join('').includes('LEAKME'));
+  });
+  it('retention bounds are validated', () => {
+    assert.ok(problems({ ...base, RETENTION_VIDEO_DAYS: '0' }).some((x) => /RETENTION_VIDEO_DAYS/.test(x)));
+    assert.ok(problems({ ...base, RETENTION_ACCOUNT_GRACE_DAYS: '9999' }).some((x) => /RETENTION_ACCOUNT_GRACE_DAYS/.test(x)));
+    assert.equal(loadConfig({ ...base, RETENTION_VIDEO_DAYS: '7' }).retention.videoDays, 7);
+  });
+});

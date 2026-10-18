@@ -16,7 +16,7 @@ before(async () => { pool = await freshDatabase(); });
 after(() => { pool?.close(); });
 
 async function boot(provider: 'mock' | 'meta') {
-  const cfg = loadConfig({ ...env, INSTAGRAM_PROVIDER: provider, ...(provider === 'meta' ? { META_GRAPH_BASE_URL: 'https://graph.example.test', META_GRAPH_VERSION: 'v0.0' } : {}) });
+  const cfg = loadConfig({ ...env, INSTAGRAM_PROVIDER: provider, ...(provider === 'meta' ? { META_GRAPH_BASE_URL: 'https://graph.example.test', META_GRAPH_VERSION: 'v0.0', META_APP_ID: 'APP', META_APP_SECRET: 'SECRET', META_REDIRECT_URI: 'https://api.example.test/cb', OAUTH_STATE_SECRET: 's'.repeat(40) } : {}) });
   const mails: { to: string; token: string }[] = [];
   const c = compose({ cfg, db: pool!.executor(), clock: new FakeClock(new Date()), queue: { wakeCycle: async () => undefined, wakeJob: async () => undefined }, storage: new FakeStorage(), logger: { info: () => undefined, error: () => undefined },
     mailer: { sendVerificationEmail: async (to, token) => { mails.push({ to, token }); }, sendPasswordResetEmail: async () => undefined } });

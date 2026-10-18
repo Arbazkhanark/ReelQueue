@@ -19,7 +19,7 @@ install error names a non-existent version, adjust that range; the lockfile then
 ## 3. Environment
 ```bash
 cp .env.example .env
-openssl rand -base64 48   # JWT_ACCESS_SECRET, OAUTH_STATE_SECRET (run twice)
+openssl rand -base64 48   # JWT_SECRET, OAUTH_STATE_SECRET (run twice; they MUST differ)
 openssl rand -base64 32   # TOKEN_ENCRYPTION_KEYS=k1:<output>
 ```
 Keep `INSTAGRAM_PROVIDER=mock` until Meta credentials exist.
@@ -34,7 +34,7 @@ PGDATABASE=reelqueue_verify ./scripts/verify-db.sh     # DESTRUCTIVE to that DB;
 ## 5. Verification commands (record every failure)
 ```bash
 pnpm -r typecheck
-pnpm -r test                      # last observed here (2026-10-18): core 123, integrations 19, db 43, services 41, http 15, runtime 7, worker 6, web lib 65 = 319; db/services/http/runtime/worker need local Postgres
+pnpm -r test                      # last observed here (2026-10-18): core 125, integrations 32, db 52, services 50, http 17, runtime 18, worker 10, web lib 65 = 369; db/services/http/runtime/worker need local Postgres
 pnpm --filter @reelqueue/web build
 ```
 
@@ -60,8 +60,15 @@ Storage CORS must allow PUT from the web origin. The `LogMailer` prints the veri
 
 ## 10. Known failures / unverified / manual steps
 - All framework code (BullMQ/ioredis/pg entrypoints `apps/api/src/main.ts` and `apps/worker/src/main.ts`, Next pages) is UNVERIFIED until step 5 passes. No Nest/TypeORM code exists (see ADR deviation in IMPLEMENTATION_STATUS).
-- Production cannot start yet: no real mail transport, no Meta OAuth connect/callback. Mock mode only.
+- Production start is UNVERIFIED: SMTP transport (tested only against an in-process fake server: try a real provider with STARTTLS on 587 and implicit TLS on 465 and check certificate validation) and Meta OAuth connect/callback/refresh (fake HTTP only) now exist but have never touched a real SMTP server or a real Meta app.
+- Run `MAIL_TRANSPORT=smtp` with SMTP_HOST/PORT/SECURITY/USER/PASS and MAIL_FROM; production refuses `log` and `SMTP_SECURITY=none`. Mail is not durable (no outbox).
+- Meta mode needs META_APP_ID, META_APP_SECRET, META_REDIRECT_URI (https in production, must be registered in the Meta app), OAUTH_STATE_SECRET, WEB_BASE_URL. Check on a real test account: the callback, the `data[]` token response shape, `account_type` values, granted `permissions`, the 24 h minimum token age before refresh, and a refresh at least once.
+- Worker maintenance (token refresh, retention, upload cleanup, rate-limit purge) runs every `RETENTION_INTERVAL_MS` (default 1 h) in each worker; confirm in the logs ("maintenance"). Retention: `RETENTION_VIDEO_DAYS` (30), `RETENTION_ACCOUNT_GRACE_DAYS` (14).
+- Dockerfiles / deployment config are deliberately NOT written yet: they must only be added after `pnpm install`, a real build and a real API/worker/web start have succeeded.
 - `MetaInstagramProvider` has only run against a fake HTTP client; verify every endpoint/field/error code against a real test account before `INSTAGRAM_PROVIDER=meta`.
 - Meta: OAuth endpoints, token lifetimes, Reel media spec, dev-mode behaviour are unverified (`docs/INSTAGRAM_SETUP.md`).
 - Meta App Review / Advanced Access is required to serve users other than yourself and cannot be done from code.
 - R2 bucket CORS (PUT from your web origin) must be configured manually.
+
+## 11. Back up the repository FIRST (no git remote is configured; commits exist only in this workspace)
+See `docs/BACKUP.md` for the exact secret-safe steps (private remote push, or a verified `git bundle` / archive).

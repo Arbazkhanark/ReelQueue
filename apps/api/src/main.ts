@@ -9,9 +9,9 @@ import { Redis } from 'ioredis';
 import { join } from 'node:path';
 import { SystemClock } from '@reelqueue/core';
 import { PgSqlExecutor, loadMigrations, runMigrations } from '@reelqueue/db';
-import { S3StorageProvider } from '@reelqueue/integrations';
+import { S3StorageProvider, SmtpTransport } from '@reelqueue/integrations';
 import { createApi, createNodeServer } from '@reelqueue/http';
-import { BullWakeQueue, LogMailer, QUEUE_NAME, compose, loadConfig, ConfigError } from '@reelqueue/runtime';
+import { BullWakeQueue, LogMailer, SmtpMailer, QUEUE_NAME, compose, loadConfig, ConfigError } from '@reelqueue/runtime';
 
 const log = (level: 'info' | 'error') => (o: Record<string, unknown>, msg: string) => console[level === 'info' ? 'log' : 'error'](JSON.stringify({ level, msg, time: new Date().toISOString(), ...o }));
 const logger = { info: log('info'), error: log('error') };
@@ -32,7 +32,10 @@ async function main(): Promise<void> {
   const clock = new SystemClock();
   const queue = new BullWakeQueue(new Queue(QUEUE_NAME, { connection: redis }), () => clock.now(), { info: logger.info, warn: logger.info });
   const storage = new S3StorageProvider({ endpoint: cfg.s3.endpoint, region: cfg.s3.region, bucket: cfg.s3.bucket, credentials: { accessKeyId: cfg.s3.accessKeyId, secretAccessKey: cfg.s3.secretAccessKey }, forcePathStyle: cfg.s3.forcePathStyle }, { clock });
-  const c = compose({ cfg, db, clock, queue, storage, logger, mailer: new LogMailer(logger.info, cfg.allowedOrigins[0]!) });
+  const mailer = cfg.mail.smtp
+    ? new SmtpMailer(new SmtpTransport(cfg.mail.smtp), cfg.mail.from, cfg.webBaseUrl, (o, m) => logger.error(o, m))
+    : new LogMailer(logger.info, cfg.webBaseUrl);
+  const c = compose({ cfg, db, clock, queue, storage, logger, mailer });
 
   const handle = createApi({
     ...c.apiDeps,
@@ -43,7 +46,7 @@ async function main(): Promise<void> {
 
   const shutdown = (sig: string) => {
     logger.info({ sig }, 'shutting down');
-    server.close(() => { void Promise.allSettled([pool.end(), redis.quit()]).then(() => process.exit(0)); });
+    server.close(() => { void Promise.allSettled([mailer instanceof SmtpMailer ? mailer.drain() : Promise.resolve(), pool.end(), redis.quit()]).then(() => process.exit(0)); });
     setTimeout(() => process.exit(1), 15_000).unref();
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

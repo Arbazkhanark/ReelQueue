@@ -16,8 +16,14 @@ export interface AppConfig {
   /** 'mock' = simulation only (UI shows a banner, mock-connect enabled). 'meta' = real Instagram (UNVERIFIED, see docs/INSTAGRAM_SETUP.md). */
   instagramProvider: 'mock' | 'meta';
   meta: { baseUrl: string; graphVersion: string; requestTimeoutMs: number } | null;
+  /** Instagram Login OAuth (meta mode only). */
+  oauth: { appId: string; appSecret: string; redirectUri: string; scopes: string[]; stateSecret: string } | null;
+  /** Where the browser lands after the OAuth callback and what mail links point to (a single exact origin). */
+  webBaseUrl: string;
   s3: { endpoint: string; region: string; bucket: string; accessKeyId: string; secretAccessKey: string; forcePathStyle: boolean };
-  mailTransport: 'log';
+  mailTransport: 'log' | 'smtp';
+  mail: { from: string; smtp: { host: string; port: number; security: 'tls' | 'starttls' | 'none'; user?: string; pass?: string; helo: string; timeoutMs: number } | null };
+  retention: { videoDays: number; accountGraceDays: number; intervalMs: number };
   worker: { concurrency: number; sweepIntervalMs: number; sweepJitterMs: number };
   migrateOnBoot: boolean;
 }
@@ -80,12 +86,38 @@ export function loadConfig(env: Env): AppConfig {
   if (prod && !secureCookies) problems.push('COOKIE_SECURE must not be false in production');
 
   const mailTransport = str('MAIL_TRANSPORT', { def: 'log' });
-  if (mailTransport !== 'log') problems.push('MAIL_TRANSPORT: only "log" is implemented');
-  if (prod && mailTransport === 'log') problems.push('MAIL_TRANSPORT=log is not allowed in production (no real mail transport is implemented yet: signup/reset emails would never be delivered)');
+  if (mailTransport !== 'log' && mailTransport !== 'smtp') problems.push('MAIL_TRANSPORT must be "log" or "smtp"');
+  if (prod && mailTransport === 'log') problems.push('MAIL_TRANSPORT=log is not allowed in production (it writes one-time links to the log); use smtp');
+  const mailFrom = str('MAIL_FROM', { required: false, def: '' });
+  let smtp: AppConfig['mail']['smtp'] = null;
+  if (mailTransport === 'smtp') {
+    const security = str('SMTP_SECURITY', { def: 'starttls' });
+    if (security !== 'tls' && security !== 'starttls' && security !== 'none') problems.push('SMTP_SECURITY must be tls, starttls or none');
+    if (prod && security === 'none') problems.push('SMTP_SECURITY=none is not allowed in production');
+    const host = str('SMTP_HOST');
+    const user = env.SMTP_USER?.trim() || undefined; const pass = env.SMTP_PASS || undefined;
+    if (!!user !== !!pass) problems.push('SMTP_USER and SMTP_PASS must be set together');
+    if (user && security === 'none' && !['localhost', '127.0.0.1', '::1'].includes(host)) problems.push('SMTP credentials require SMTP_SECURITY=tls or starttls (refusing cleartext credentials)');
+    if (!/^[^<>\r\n]*<[^<>\s@]+@[^<>\s@]+>$|^[^<>\s@]+@[^<>\s@]+$/.test(mailFrom)) problems.push('MAIL_FROM is required and must be "name@host" or "Name <name@host>"');
+    smtp = { host, port: int('SMTP_PORT', security === 'tls' ? 465 : 587, 1, 65535), security: (security as 'tls' | 'starttls' | 'none'), ...(user ? { user } : {}), ...(pass ? { pass } : {}), helo: str('SMTP_HELO', { def: 'reelqueue' }), timeoutMs: int('SMTP_TIMEOUT_MS', 10_000, 500, 60_000) };
+  }
+
+  const webBaseUrl = str('WEB_BASE_URL', { required: false, def: origins[0] ?? '' });
+  try { const u = new URL(webBaseUrl); if (u.origin !== webBaseUrl) problems.push('WEB_BASE_URL must be an exact origin without path or trailing slash'); if (prod && u.protocol !== 'https:') problems.push('WEB_BASE_URL must be https in production'); }
+  catch { problems.push('WEB_BASE_URL is not a valid URL'); }
 
   let meta: AppConfig['meta'] = null;
+  let oauth: AppConfig['oauth'] = null;
   if (provider === 'meta') {
     meta = { baseUrl: str('META_GRAPH_BASE_URL'), graphVersion: str('META_GRAPH_VERSION'), requestTimeoutMs: int('META_REQUEST_TIMEOUT_MS', 20_000, 1000, 120_000) };
+    const stateSecret = str('OAUTH_STATE_SECRET');
+    if (stateSecret && stateSecret.length < 32) problems.push('OAUTH_STATE_SECRET must be at least 32 characters');
+    if (stateSecret && stateSecret === jwtSecret) problems.push('OAUTH_STATE_SECRET must differ from JWT_SECRET');
+    const redirectUri = str('META_REDIRECT_URI');
+    try { const u = new URL(redirectUri); if (prod && u.protocol !== 'https:') problems.push('META_REDIRECT_URI must be https in production'); if (u.hash) problems.push('META_REDIRECT_URI must not contain a fragment'); }
+    catch { if (redirectUri) problems.push('META_REDIRECT_URI is not a valid URL'); }
+    const scopes = str('META_SCOPES', { def: 'instagram_business_basic,instagram_business_content_publish' }).split(',').map((x) => x.trim()).filter(Boolean);
+    oauth = { appId: str('META_APP_ID'), appSecret: str('META_APP_SECRET'), redirectUri, scopes, stateSecret };
   }
   if (prod && provider === 'mock') problems.push('INSTAGRAM_PROVIDER=mock is not allowed in production');
 
@@ -96,9 +128,10 @@ export function loadConfig(env: Env): AppConfig {
     redisUrl: str('REDIS_URL'),
     allowedOrigins: origins, secureCookies, trustProxy: bool('TRUST_PROXY', false),
     jwtSecret, tokenKeys, tokenActiveKeyId,
-    instagramProvider: provider === 'meta' ? 'meta' : 'mock', meta,
+    instagramProvider: provider === 'meta' ? 'meta' : 'mock', meta, oauth, webBaseUrl,
     s3: { endpoint: str('S3_ENDPOINT'), region: str('S3_REGION', { def: 'auto' }), bucket: str('S3_BUCKET'), accessKeyId: str('S3_ACCESS_KEY_ID'), secretAccessKey: str('S3_SECRET_ACCESS_KEY'), forcePathStyle: bool('S3_FORCE_PATH_STYLE', true) },
-    mailTransport: 'log',
+    mailTransport: mailTransport === 'smtp' ? 'smtp' : 'log', mail: { from: mailFrom, smtp },
+    retention: { videoDays: int('RETENTION_VIDEO_DAYS', 30, 1, 3650), accountGraceDays: int('RETENTION_ACCOUNT_GRACE_DAYS', 14, 1, 365), intervalMs: int('RETENTION_INTERVAL_MS', 3_600_000, 60_000, 86_400_000) },
     worker: { concurrency: int('WORKER_CONCURRENCY', 5, 1, 100), sweepIntervalMs: int('SWEEP_INTERVAL_MS', 30_000, 1000, 3_600_000), sweepJitterMs: int('SWEEP_JITTER_MS', 5000, 0, 60_000) },
     migrateOnBoot: bool('MIGRATE_ON_BOOT', !prod),
   };
