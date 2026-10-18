@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { hashToken, parseCookies, serializeCookie, clearCookie, type Clock, type RateLimiter } from '@reelqueue/core';
 import type { UserRow } from '@reelqueue/db';
 import {
-  AccountService, AuthService, CycleService, MeService, ReadService, SettingsService, UploadFlow, UploadService, type SessionTokens,
+  AccountService, AuthService, CycleService, InstagramConnectService, MeService, ReadService, SettingsService, UploadFlow, UploadService, type SessionTokens,
 } from '@reelqueue/services';
 import { API_ERROR_STATUS, AUTH_COOKIES, AppError, type ApiErrorBody, type UserDto } from '@reelqueue/shared';
 import { json, type HttpRequest, type HttpResponse } from './http';
@@ -18,12 +18,16 @@ export interface ApiConfig {
   refreshTtlSeconds: number;
   /** Per-IP ceiling across all routes. */
   globalPerMinute: number;
+  /** Where the OAuth callback sends the browser afterwards (the web app origin). Defaults to the first allowed origin. */
+  webBaseUrl?: string;
 }
 export interface ApiLogger { info(o: Record<string, unknown>, msg: string): void; error(o: Record<string, unknown>, msg: string): void }
 export interface ApiDeps {
   auth: AuthService; uploads: UploadService; flow: UploadFlow; read: ReadService; settings: SettingsService; accounts: AccountService;
   cycles: CycleService; me: MeService; limiter: RateLimiter; clock: Clock; config: ApiConfig; logger: ApiLogger;
   checks: { database(): Promise<boolean>; redis(): Promise<boolean> };
+  /** Present only when INSTAGRAM_PROVIDER=meta. Without it the connect routes behave as not enabled. */
+  instagramConnect?: InstagramConnectService;
 }
 
 const toUserDto = (u: UserRow): UserDto => ({
@@ -136,6 +140,32 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
   user({ method: 'POST', pattern: '/v1/instagram/mock-connect', handler: async ({ req, principal }) => {
     const f = new Fields(req.body); const username = f.str('username', { max: 30 }); f.done();
     return json(201, await d.accounts.mockConnect(principal!.userId, username));
+  } });
+  const OAUTH_COOKIE = 'rq_oauth';
+  const oauthCookieOpts = { path: '/v1/instagram', httpOnly: true, secure: cfg.secureCookies, sameSite: 'Lax' } as const; // Lax: Meta redirects the browser back with a top-level GET
+  user({ method: 'POST', pattern: '/v1/instagram/connect', limits: [{ name: 'ig-connect', limit: 20, windowMs: HOUR, by: (r) => r.ip }], handler: async ({ principal }) => {
+    if (!d.instagramConnect) throw new AppError('NOT_FOUND', 'Instagram connection is not enabled.');
+    const { authorizationUrl, nonce } = d.instagramConnect.start(principal!.userId);
+    const res = json(200, { authorizationUrl });
+    res.cookies.push(serializeCookie(OAUTH_COOKIE, nonce, { ...oauthCookieOpts, maxAgeSeconds: 600 }));
+    return res;
+  } });
+  // Browser redirect from Meta. The session is authenticated INSIDE the handler so every outcome is a redirect to the web app
+  // (never a JSON 401 page). The outcome code is one of a fixed set; Meta-provided text is never echoed.
+  open({ method: 'GET', pattern: '/v1/instagram/callback', limits: [{ name: 'ig-callback', limit: 30, windowMs: HOUR }], handler: async ({ req }) => {
+    const base = (cfg.webBaseUrl ?? cfg.allowedOrigins[0] ?? '').replace(/\/+$/, '');
+    const back = (q: string): HttpResponse => {
+      const r = json(302); r.headers.location = `${base}/accounts?${q}`;
+      r.cookies.push(clearCookie(OAUTH_COOKIE, oauthCookieOpts)); return r;
+    };
+    if (!d.instagramConnect) return back('error=NOT_ENABLED');
+    if (req.query.error !== undefined) return back('error=ACCESS_DENIED'); // the user declined (or Meta refused); details are not shown
+    const code = req.query.code, state = req.query.state, nonce = cookieOf(req, OAUTH_COOKIE);
+    if (!code || !state || !nonce || code.length > 2048 || state.length > 1024) return back('error=STATE_INVALID');
+    let p: Principal;
+    try { p = await d.auth.authenticate(cookieOf(req, AUTH_COOKIES.access)); } catch { return back('error=SESSION'); }
+    const r = await d.instagramConnect.complete({ userId: p.userId, code, state, nonce });
+    return back(r.ok ? 'connected=1' : `error=${r.reason}`);
   } });
   user({ method: 'POST', pattern: '/v1/instagram/accounts/:id/disconnect', handler: async ({ params, principal }) => json(200, await d.accounts.disconnect(principal!.userId, uuidParam(params.id, 'Instagram account'))) });
   user({ method: 'POST', pattern: '/v1/instagram/accounts/:id/refresh-quota', limits: [{ name: 'quota', limit: 30, windowMs: HOUR }], handler: async ({ params, principal }) => json(200, await d.accounts.refreshQuota(principal!.userId, uuidParam(params.id, 'Instagram account'))) });

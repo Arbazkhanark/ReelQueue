@@ -4,7 +4,7 @@ import { TokenCipher, MockInstagramProvider } from '@reelqueue/core';
 import { StorageMediaUrlProvider, DbTokenResolver, CompositeProviderResolver, tokenAad } from '../src';
 
 const cipher = new TokenCipher({ keys: { k1: Buffer.alloc(32, 1) }, activeKeyId: 'k1' });
-const acct = (o: Record<string, unknown> = {}) => ({ userId: 'u1', provider: 'META' as const, providerAccountId: 'ig1', accessTokenEnc: cipher.encrypt('SECRET', tokenAad('u1', 'ig1')), status: 'ACTIVE', ...o });
+const acct = (o: Record<string, unknown> = {}) => ({ userId: 'u1', provider: 'META' as const, providerAccountId: 'ig1', accessTokenEnc: cipher.encrypt('SECRET', tokenAad('u1', 'ig1')), status: 'CONNECTED', ...o });
 
 describe('production wiring adapters', () => {
   it('media url: presigns the stored key; refuses unavailable videos', async () => {
@@ -17,12 +17,14 @@ describe('production wiring adapters', () => {
   it('token resolver: decrypts for META/ACTIVE; fails closed otherwise; error text never contains the token', async () => {
     const r = (a: unknown) => new DbTokenResolver({ getCredentials: async () => a as never }, cipher).resolve('x');
     assert.deepEqual(await r(acct()), { accessToken: 'SECRET', igUserId: 'ig1' });
-    await assert.rejects(r(null), /not found/);
-    await assert.rejects(r(acct({ provider: 'MOCK' })), /Not a real/);
-    await assert.rejects(r(acct({ status: 'EXPIRED' })), /EXPIRED/);
-    await assert.rejects(r(acct({ accessTokenEnc: null })), /no stored token/);
+    const kind = (p: Promise<unknown>, k: string, re: RegExp) => assert.rejects(p, (e: Error & { kind?: string }) => e.name === 'ProviderError' && e.kind === k && re.test(e.message));
+    await kind(r(null), 'VALIDATION', /not found/);
+    await kind(r(acct({ provider: 'MOCK' })), 'VALIDATION', /Not a real/);
+    await kind(r(acct({ status: 'REAUTH_REQUIRED' })), 'AUTH_EXPIRED', /REAUTH_REQUIRED/);
+    await kind(r(acct({ status: 'PERMISSION_REVOKED' })), 'PERMISSION_REVOKED', /revoked/);
+    await kind(r(acct({ accessTokenEnc: null })), 'AUTH_EXPIRED', /no stored token/);
     // ciphertext copied to a different owner must not decrypt (AAD binding)
-    await assert.rejects(r(acct({ userId: 'attacker' })), (e: Error) => /could not be decrypted/.test(e.message) && !e.message.includes('SECRET'));
+    await assert.rejects(r(acct({ userId: 'attacker' })), (e: Error & { kind?: string }) => e.kind === 'AUTH_EXPIRED' && /could not be decrypted/.test(e.message) && !e.message.includes('SECRET'));
   });
   it('provider resolver: MOCK always; META only when configured (never falls back to mock)', () => {
     const mock = new MockInstagramProvider(); const meta = new MockInstagramProvider();

@@ -1,8 +1,8 @@
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
-import { MemoryRateLimitStore, RateLimiter, ScryptPasswordHasher, type MediaMetadata } from '@reelqueue/core';
+import { MemoryRateLimitStore, RateLimiter, ScryptPasswordHasher, TokenCipher, type MediaMetadata } from '@reelqueue/core';
 import { AccountStore, AuthStore, QueryStore, SchedulerStore, SettingsStore, VideoStore } from '@reelqueue/db';
-import { AccountService, AuthService, CycleService, DEFAULT_AUTH_CONFIG, DEFAULT_UPLOAD_CONFIG, MeService, ReadService, SettingsService, UploadFlow, UploadService, type Mailer } from '@reelqueue/services';
+import { AccountService, AuthService, CycleService, InstagramConnectService, type OAuthPort, DEFAULT_AUTH_CONFIG, DEFAULT_UPLOAD_CONFIG, MeService, ReadService, SettingsService, UploadFlow, UploadService, type Mailer } from '@reelqueue/services';
 import { createApi, createNodeServer, type ApiConfig } from '../../src';
 import { freshDatabase } from '../../../db/test/helpers/fixtures';
 import type { PsqlPool } from '../../../db/test/helpers/psql-executor';
@@ -19,7 +19,7 @@ export interface Stack {
   probe: { meta: MediaMetadata | null }; server: Server; url: string; close(): Promise<void>;
 }
 
-export async function startStack(over: { mockMode?: boolean; config?: Partial<ApiConfig> } = {}): Promise<Stack | null> {
+export async function startStack(over: { mockMode?: boolean; config?: Partial<ApiConfig>; oauth?: OAuthPort } = {}): Promise<Stack | null> {
   const pool = await freshDatabase();
   if (!pool) return null;
   const db = pool.executor();
@@ -40,8 +40,11 @@ export async function startStack(over: { mockMode?: boolean; config?: Partial<Ap
   const read = new ReadService({ cycles: sched, query, accounts, settings: settingsStore, uploads, videos, clock: sim.clock, mockMode });
   const cycles = new CycleService(sched, accounts, settingsStore, providers, sim.queue, read, sim.clock);
   const auth = new AuthService(new AuthStore(db), new ScryptPasswordHasher({ N: 1024, r: 8, p: 1, keyLen: 32, saltLen: 16 }), mailer, sim.clock, { ...DEFAULT_AUTH_CONFIG, jwtSecret: 'j'.repeat(48) });
-  const config: ApiConfig = { allowedOrigins: [WEB_ORIGIN], secureCookies: true, sameSite: 'Lax', accessTtlSeconds: 900, refreshTtlSeconds: 30 * 86400, globalPerMinute: 10_000, ...over.config };
+  const config: ApiConfig = { allowedOrigins: [WEB_ORIGIN], secureCookies: true, sameSite: 'Lax', accessTtlSeconds: 900, refreshTtlSeconds: 30 * 86400, globalPerMinute: 10_000, webBaseUrl: WEB_ORIGIN, ...over.config };
+  const cipher = new TokenCipher({ keys: { k1: Buffer.alloc(32, 5) }, activeKeyId: 'k1' });
+  const instagramConnect = over.oauth ? new InstagramConnectService(accounts, over.oauth, cipher, sim.clock, { stateSecret: 'o'.repeat(40), stateMaxAgeMs: 600_000, requiredScopes: ['instagram_business_basic', 'instagram_business_content_publish'] }) : undefined;
   const api = createApi({
+    ...(instagramConnect ? { instagramConnect } : {}),
     auth, uploads, read, cycles, config, clock: sim.clock,
     flow: new UploadFlow(uploads, query, videos, read), settings: new SettingsService(settingsStore, accounts, read),
     accounts: new AccountService(accounts, sched, providers, read, sim.clock, { mockMode }), me: new MeService(auth, sched, cycles),

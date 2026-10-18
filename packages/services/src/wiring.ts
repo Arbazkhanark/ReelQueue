@@ -1,4 +1,4 @@
-import { DecryptionError, MediaUnavailableError, type InstagramProvider, type MediaUrlProvider, type ProviderResolver, type StorageProvider, type TokenCipher } from '@reelqueue/core';
+import { DecryptionError, MediaUnavailableError, ProviderError, type InstagramProvider, type MediaUrlProvider, type ProviderResolver, type StorageProvider, type TokenCipher } from '@reelqueue/core';
 import type { MetaCredentials, TokenResolver } from '@reelqueue/integrations';
 
 /** Production adapters that glue stores to the core/integration ports. No test doubles here. */
@@ -19,19 +19,24 @@ export interface CredentialLookup {
   getCredentials(accountId: string): Promise<{ userId: string; provider: 'META' | 'MOCK'; providerAccountId: string; accessTokenEnc: string | null; status: string } | null>;
 }
 
-/** Resolves + decrypts a real account's token per call. Refuses MOCK accounts, inactive accounts and undecryptable tokens (fail closed, message never contains the token). */
+/**
+ * Resolves + decrypts a real account's token per call. Fails closed with PROVIDER errors (not bare Errors) so the executor's
+ * normal handling applies: an account that needs re-authorisation pauses the cycle with a reason instead of the job being
+ * redelivered forever. Messages never contain the token.
+ */
 export class DbTokenResolver implements TokenResolver {
   constructor(private readonly accounts: CredentialLookup, private readonly cipher: TokenCipher) {}
   async resolve(accountId: string): Promise<MetaCredentials> {
     const c = await this.accounts.getCredentials(accountId);
-    if (!c) throw new Error('Instagram account not found');
-    if (c.provider !== 'META') throw new Error('Not a real Instagram account');
-    if (c.status !== 'ACTIVE') throw new Error(`Instagram account is ${c.status}`);
-    if (!c.accessTokenEnc) throw new Error('Instagram account has no stored token');
+    if (!c) throw new ProviderError('VALIDATION', 'Instagram account not found');
+    if (c.provider !== 'META') throw new ProviderError('VALIDATION', 'Not a real Instagram account');
+    if (c.status === 'PERMISSION_REVOKED') throw new ProviderError('PERMISSION_REVOKED', 'Instagram permission was revoked');
+    if (c.status !== 'CONNECTED') throw new ProviderError('AUTH_EXPIRED', `Instagram account needs to be reconnected (${c.status})`);
+    if (!c.accessTokenEnc) throw new ProviderError('AUTH_EXPIRED', 'Instagram account has no stored token');
     try {
       return { accessToken: this.cipher.decrypt(c.accessTokenEnc, tokenAad(c.userId, c.providerAccountId)), igUserId: c.providerAccountId };
     } catch (e) {
-      if (e instanceof DecryptionError) throw new Error('Stored Instagram token could not be decrypted');
+      if (e instanceof DecryptionError) throw new ProviderError('AUTH_EXPIRED', 'Stored Instagram token could not be decrypted');
       throw e;
     }
   }
