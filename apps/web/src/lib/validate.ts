@@ -62,7 +62,7 @@ export function validateEmail(email: string): string | null {
 
 /** Hint-level check only; the API enforces the real password policy and its message is shown if it disagrees. */
 export function validateNewPassword(pw: string): string | null {
-  if (pw.length < 8) return 'Use at least 8 characters.';
+  if (pw.length < 12) return 'Use at least 12 characters.';
   if (pw.length > 128) return 'Use at most 128 characters.';
   return null;
 }
