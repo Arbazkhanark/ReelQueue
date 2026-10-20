@@ -221,9 +221,9 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 
 import { call, errorMessage } from "@/lib/api";
 import { invalidate, useApi } from "@/lib/use-api";
@@ -249,7 +249,7 @@ const INSTAGRAM_ERRORS: Record<string, string> = {
   STATE_INVALID:
     "Instagram connection could not be verified or has expired. Please try again.",
   ACCESS_DENIED:
-    "Instagram access was denied. Please try again if you want to connect.",
+    "You denied Instagram access. Please try again if you want to connect.",
   SESSION:
     "Your session has expired. Please log in again.",
   NOT_ENABLED:
@@ -266,44 +266,43 @@ export default function AccountsPage() {
   const accounts = useApi("listAccounts");
   const dash = useApi("dashboard");
   const toast = useToast();
-
   const searchParams = useSearchParams();
-  const pathname = usePathname();
-  const router = useRouter();
 
   const [username, setUsername] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
 
+  // Prevent duplicate toasts from repeated effects/renders.
+  const handledCallback = useRef<string | null>(null);
+
   const mock = dash.data?.mockMode === true;
 
-  // Show Instagram OAuth callback messages once.
   useEffect(() => {
     const error = searchParams.get("error");
     const connected = searchParams.get("connected");
 
-    if (!error && connected !== "1") return;
+    if (!error && connected !== "1") {
+      handledCallback.current = null;
+      return;
+    }
+
+    const callbackKey = error
+      ? `error:${error}`
+      : "connected:1";
+
+    if (handledCallback.current === callbackKey) return;
+    handledCallback.current = callbackKey;
 
     if (error) {
       toast.error(
         INSTAGRAM_ERRORS[error] ??
-          "Instagram could not be connected. Please try again."
+          `Instagram connection failed (${error}). Please try again.`
       );
     } else {
       toast.success("Instagram connected successfully!");
       invalidate("listAccounts", "dashboard");
     }
-
-    // Remove callback parameters so refresh doesn't repeat the toast.
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("error");
-    params.delete("connected");
-
-    const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, {
-      scroll: false,
-    });
-  }, [searchParams, pathname, router, toast]);
+  }, [searchParams, toast]);
 
   async function mockConnect(e: FormEvent) {
     e.preventDefault();
