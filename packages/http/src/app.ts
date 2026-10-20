@@ -50,6 +50,25 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
 
   const setSession = (res: HttpResponse, t: SessionTokens): HttpResponse => {
     const base = { secure: cfg.secureCookies, sameSite: cfg.sameSite, httpOnly: true } as const;
+    d.logger.info({
+      event: 'auth.cookies.issued',
+      cookies: [
+        {
+          name: AUTH_COOKIES.access,
+          secure: cfg.secureCookies,
+          sameSite: cfg.sameSite,
+          httpOnly: true,
+          path: '/',
+        },
+        {
+          name: AUTH_COOKIES.refresh,
+          secure: cfg.secureCookies,
+          sameSite: cfg.sameSite,
+          httpOnly: true,
+          path: '/v1/auth',
+        },
+      ],
+    }, 'auth cookies issued');
     res.cookies.push(
       serializeCookie(AUTH_COOKIES.access, t.accessToken, { ...base, path: '/', maxAgeSeconds: cfg.accessTtlSeconds }),
       // The refresh cookie is only ever sent to the auth endpoints.
@@ -83,6 +102,10 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
   } });
   open({ method: 'POST', pattern: '/v1/auth/refresh', limits: [{ name: 'refresh', limit: 120, windowMs: MIN }], handler: async ({ req }) => {
     const raw = cookieOf(req, AUTH_COOKIES.refresh);
+      d.logger.info({
+        event: 'auth.refresh.cookie',
+        present: Boolean(raw),
+      }, 'refresh cookie received');
     if (!raw) return clearSession(errRes(new AppError('UNAUTHENTICATED', 'Session expired. Sign in again.'), 'refresh'));
     try {
       const t = await d.auth.refresh(raw, clientCtx(req));
@@ -290,10 +313,47 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
           const dec = await d.limiter.check(`${rule.name}:${by ?? req.ip}`, rule.limit, rule.windowMs);
           if (!dec.allowed) return rateLimited(dec.retryAfterSeconds, requestId);
         }
+
         if (m.route.auth !== 'none') {
-          principal = await d.auth.authenticate(cookieOf(req, AUTH_COOKIES.access));
-          if (m.route.auth === 'admin' && principal.role !== 'ADMIN') throw new AppError('FORBIDDEN', 'Forbidden.');
-        }
+          const accessToken = cookieOf(req, AUTH_COOKIES.access);
+
+          d.logger.info({
+            event: 'auth.cookie.received',
+            requestId,
+            path: req.path,
+            cookieName: AUTH_COOKIES.access,
+            present: Boolean(accessToken),
+          }, 'auth cookie received');
+
+          try {
+            principal = await d.auth.authenticate(accessToken);
+
+            d.logger.info({
+              event: 'auth.validation',
+              requestId,
+              path: req.path,
+              valid: true,
+            }, 'auth validation result');
+
+          } catch (e) {
+            d.logger.info({
+              event: 'auth.validation',
+              requestId,
+              path: req.path,
+              valid: false,
+              reason: e instanceof AppError
+                ? e.code
+                : 'UNEXPECTED_ERROR',
+            }, 'auth validation result');
+
+            throw e;
+          }
+
+          if (m.route.auth === 'admin' && principal.role !== 'ADMIN') {
+            throw new AppError('FORBIDDEN', 'Forbidden.');
+          }
+      }
+
         return m.route.handler({ req, params: m.params, principal, requestId });
       })();
     } catch (e) {
