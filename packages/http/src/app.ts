@@ -166,30 +166,225 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
   } });
   const OAUTH_COOKIE = 'rq_oauth';
   const oauthCookieOpts = { path: '/v1/instagram', httpOnly: true, secure: cfg.secureCookies, sameSite: 'Lax' } as const; // Lax: Meta redirects the browser back with a top-level GET
-  user({ method: 'POST', pattern: '/v1/instagram/connect', limits: [{ name: 'ig-connect', limit: 20, windowMs: HOUR, by: (r) => r.ip }], handler: async ({ principal }) => {
-    if (!d.instagramConnect) throw new AppError('NOT_FOUND', 'Instagram connection is not enabled.');
-    const { authorizationUrl, nonce } = d.instagramConnect.start(principal!.userId);
-    const res = json(200, { authorizationUrl });
-    res.cookies.push(serializeCookie(OAUTH_COOKIE, nonce, { ...oauthCookieOpts, maxAgeSeconds: 600 }));
-    return res;
-  } });
+  // user({ method: 'POST', pattern: '/v1/instagram/connect', limits: [{ name: 'ig-connect', limit: 20, windowMs: HOUR, by: (r) => r.ip }], handler: async ({ principal }) => {
+  //   if (!d.instagramConnect) throw new AppError('NOT_FOUND', 'Instagram connection is not enabled.');
+  //   const { authorizationUrl, nonce } = d.instagramConnect.start(principal!.userId);
+  //   const res = json(200, { authorizationUrl });
+  //   res.cookies.push(serializeCookie(OAUTH_COOKIE, nonce, { ...oauthCookieOpts, maxAgeSeconds: 600 }));
+  //   return res;
+  // } });
+  user({
+    method: 'POST',
+    pattern: '/v1/instagram/connect',
+    limits: [
+      {
+        name: 'ig-connect',
+        limit: 20,
+        windowMs: HOUR,
+        by: (r) => r.ip,
+      },
+    ],
+    handler: async ({ principal, requestId }) => {
+      d.logger.info({
+        event: 'instagram.oauth.connect.started',
+        requestId,
+        userId: principal!.userId,
+        providerEnabled: Boolean(d.instagramConnect),
+      }, 'Instagram OAuth connect started');
+
+      if (!d.instagramConnect) {
+        d.logger.error({
+          event: 'instagram.oauth.connect.disabled',
+          requestId,
+        }, 'Instagram OAuth provider is disabled');
+
+        throw new AppError(
+          'NOT_FOUND',
+          'Instagram connection is not enabled.',
+        );
+      }
+
+      const { authorizationUrl, nonce } =
+        d.instagramConnect.start(principal!.userId);
+
+      d.logger.info({
+        event: 'instagram.oauth.connect.state_created',
+        requestId,
+        nonceCreated: Boolean(nonce),
+        authorizationUrlCreated: Boolean(authorizationUrl),
+        cookieName: OAUTH_COOKIE,
+        cookiePath: oauthCookieOpts.path,
+        cookieSecure: oauthCookieOpts.secure,
+        cookieSameSite: oauthCookieOpts.sameSite,
+        cookieHttpOnly: oauthCookieOpts.httpOnly,
+        cookieMaxAgeSeconds: 600,
+      }, 'Instagram OAuth state and cookie prepared');
+
+      const res = json(200, { authorizationUrl });
+
+      res.cookies.push(
+        serializeCookie(OAUTH_COOKIE, nonce, {
+          ...oauthCookieOpts,
+          maxAgeSeconds: 600,
+        }),
+      );
+
+      return res;
+    },
+  });
   // Browser redirect from Meta. The session is authenticated INSIDE the handler so every outcome is a redirect to the web app
   // (never a JSON 401 page). The outcome code is one of a fixed set; Meta-provided text is never echoed.
-  open({ method: 'GET', pattern: '/v1/instagram/callback', limits: [{ name: 'ig-callback', limit: 30, windowMs: HOUR }], handler: async ({ req }) => {
-    const base = (cfg.webBaseUrl ?? cfg.allowedOrigins[0] ?? '').replace(/\/+$/, '');
-    const back = (q: string): HttpResponse => {
-      const r = json(302); r.headers.location = `${base}/accounts?${q}`;
-      r.cookies.push(clearCookie(OAUTH_COOKIE, oauthCookieOpts)); return r;
-    };
-    if (!d.instagramConnect) return back('error=NOT_ENABLED');
-    if (req.query.error !== undefined) return back('error=ACCESS_DENIED'); // the user declined (or Meta refused); details are not shown
-    const code = req.query.code, state = req.query.state, nonce = cookieOf(req, OAUTH_COOKIE);
-    if (!code || !state || !nonce || code.length > 2048 || state.length > 1024) return back('error=STATE_INVALID');
-    let p: Principal;
-    try { p = await d.auth.authenticate(cookieOf(req, AUTH_COOKIES.access)); } catch { return back('error=SESSION'); }
-    const r = await d.instagramConnect.complete({ userId: p.userId, code, state, nonce });
-    return back(r.ok ? 'connected=1' : `error=${r.reason}`);
-  } });
+  // open({ method: 'GET', pattern: '/v1/instagram/callback', limits: [{ name: 'ig-callback', limit: 30, windowMs: HOUR }], handler: async ({ req }) => {
+  //   const base = (cfg.webBaseUrl ?? cfg.allowedOrigins[0] ?? '').replace(/\/+$/, '');
+  //   const back = (q: string): HttpResponse => {
+  //     const r = json(302); r.headers.location = `${base}/accounts?${q}`;
+  //     r.cookies.push(clearCookie(OAUTH_COOKIE, oauthCookieOpts)); return r;
+  //   };
+  //   if (!d.instagramConnect) return back('error=NOT_ENABLED');
+  //   if (req.query.error !== undefined) return back('error=ACCESS_DENIED'); // the user declined (or Meta refused); details are not shown
+  //   const code = req.query.code, state = req.query.state, nonce = cookieOf(req, OAUTH_COOKIE);
+  //   if (!code || !state || !nonce || code.length > 2048 || state.length > 1024) return back('error=STATE_INVALID');
+  //   let p: Principal;
+  //   try { p = await d.auth.authenticate(cookieOf(req, AUTH_COOKIES.access)); } catch { return back('error=SESSION'); }
+  //   const r = await d.instagramConnect.complete({ userId: p.userId, code, state, nonce });
+  //   return back(r.ok ? 'connected=1' : `error=${r.reason}`);
+  // } });
+  open({
+    method: 'GET',
+    pattern: '/v1/instagram/callback',
+    limits: [
+      { name: 'ig-callback', limit: 30, windowMs: HOUR },
+    ],
+    handler: async ({ req, requestId }) => {
+      const base = (
+        cfg.webBaseUrl ?? cfg.allowedOrigins[0] ?? ''
+      ).replace(/\/+$/, '');
+
+      const back = (q: string): HttpResponse => {
+        const res = json(302);
+        res.headers.location = `${base}/accounts?${q}`;
+        res.cookies.push(clearCookie(OAUTH_COOKIE, oauthCookieOpts));
+        return res;
+      };
+
+      // Log 1: callback reached backend.
+      d.logger.info({
+        event: 'instagram.oauth.callback.received',
+        requestId,
+        providerEnabled: Boolean(d.instagramConnect),
+        hasCode: Boolean(req.query.code),
+        hasState: Boolean(req.query.state),
+        providerReturnedError: req.query.error !== undefined,
+        hasOAuthCookie: Boolean(cookieOf(req, OAUTH_COOKIE)),
+        hasAccessCookie: Boolean(cookieOf(req, AUTH_COOKIES.access)),
+        cookieHeaderPresent: Boolean(req.headers.cookie),
+        userAgentPresent: Boolean(req.headers['user-agent']),
+      }, 'Instagram OAuth callback received');
+
+      if (!d.instagramConnect) {
+        d.logger.error({
+          event: 'instagram.oauth.callback.rejected',
+          requestId,
+          reason: 'NOT_ENABLED',
+        }, 'Instagram OAuth callback rejected');
+
+        return back('error=NOT_ENABLED');
+      }
+
+      if (req.query.error !== undefined) {
+        d.logger.info({
+          event: 'instagram.oauth.callback.rejected',
+          requestId,
+          reason: 'ACCESS_DENIED',
+        }, 'Instagram OAuth provider returned an error');
+
+        return back('error=ACCESS_DENIED');
+      }
+
+      const code = req.query.code;
+      const state = req.query.state;
+      const nonce = cookieOf(req, OAUTH_COOKIE);
+
+      // Log 2: determine which required field is missing/invalid.
+      const missing = {
+        code: !code,
+        state: !state,
+        nonce: !nonce,
+      };
+
+      const tooLong = {
+        code: Boolean(code && code.length > 2048),
+        state: Boolean(state && state.length > 1024),
+      };
+
+      if (
+        !code || !state || !nonce ||
+        code.length > 2048 || state.length > 1024
+      ) {
+        d.logger.error({
+          event: 'instagram.oauth.callback.rejected',
+          requestId,
+          reason: 'STATE_INVALID',
+          missing,
+          tooLong,
+        }, 'Instagram OAuth callback missing required data');
+
+        return back('error=STATE_INVALID');
+      }
+
+      // Log 3: session authentication.
+      let p: Principal;
+
+      try {
+        p = await d.auth.authenticate(
+          cookieOf(req, AUTH_COOKIES.access),
+        );
+
+        d.logger.info({
+          event: 'instagram.oauth.callback.session_valid',
+          requestId,
+          userId: p.userId,
+        }, 'Instagram OAuth callback session validated');
+      } catch (e) {
+        d.logger.error({
+          event: 'instagram.oauth.callback.session_invalid',
+          requestId,
+          reason: e instanceof AppError ? e.code : 'UNEXPECTED_ERROR',
+        }, 'Instagram OAuth callback session validation failed');
+
+        return back('error=SESSION');
+      }
+
+      // Log 4: state verification and provider exchange happen inside service.
+      d.logger.info({
+        event: 'instagram.oauth.callback.completion_started',
+        requestId,
+        userId: p.userId,
+        codePresent: Boolean(code),
+        statePresent: Boolean(state),
+        noncePresent: Boolean(nonce),
+      }, 'Instagram OAuth completion started');
+
+      const result = await d.instagramConnect.complete({
+        userId: p.userId,
+        code,
+        state,
+        nonce,
+      });
+
+      d.logger.info({
+        event: 'instagram.oauth.callback.completion_finished',
+        requestId,
+        userId: p.userId,
+        success: result.ok,
+        reason: result.ok ? 'CONNECTED' : result.reason,
+      }, 'Instagram OAuth completion finished');
+
+      return back(
+        result.ok ? 'connected=1' : `error=${result.reason}`,
+      );
+    },
+  });
   user({ method: 'POST', pattern: '/v1/instagram/accounts/:id/disconnect', handler: async ({ params, principal }) => json(200, await d.accounts.disconnect(principal!.userId, uuidParam(params.id, 'Instagram account'))) });
   user({ method: 'POST', pattern: '/v1/instagram/accounts/:id/refresh-quota', limits: [{ name: 'quota', limit: 30, windowMs: HOUR }], handler: async ({ params, principal }) => json(200, await d.accounts.refreshQuota(principal!.userId, uuidParam(params.id, 'Instagram account'))) });
 
