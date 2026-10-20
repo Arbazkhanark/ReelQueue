@@ -17,7 +17,7 @@ const origin = (value: string | undefined, fallback: string): string[] =>
     })
     .filter(Boolean);
 
-const apiOrigins = origin(process.env.NEXT_PUBLIC_API_ORIGIN, 'http://localhost:4000');
+const apiOrigins = origin(process.env.NEXT_PUBLIC_API_ORIGIN, 'https://reelqueue-api.onrender.com');
 const storageOrigins = origin(process.env.NEXT_PUBLIC_STORAGE_ORIGIN, '');
 
 /**
