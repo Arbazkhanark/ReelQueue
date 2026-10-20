@@ -40,7 +40,7 @@ export async function startStack(over: { mockMode?: boolean; config?: Partial<Ap
   const read = new ReadService({ cycles: sched, query, accounts, settings: settingsStore, uploads, videos, clock: sim.clock, mockMode });
   const cycles = new CycleService(sched, accounts, settingsStore, providers, sim.queue, read, sim.clock);
   const auth = new AuthService(new AuthStore(db), new ScryptPasswordHasher({ N: 1024, r: 8, p: 1, keyLen: 32, saltLen: 16 }), mailer, sim.clock, { ...DEFAULT_AUTH_CONFIG, jwtSecret: 'j'.repeat(48) });
-  const config: ApiConfig = { allowedOrigins: [WEB_ORIGIN], secureCookies: true, sameSite: 'None', accessTtlSeconds: 900, refreshTtlSeconds: 30 * 86400, globalPerMinute: 10_000, webBaseUrl: WEB_ORIGIN, ...over.config };
+  const config: ApiConfig = { allowedOrigins: [WEB_ORIGIN], secureCookies: true, sameSite: 'Lax', accessTtlSeconds: 900, refreshTtlSeconds: 30 * 86400, globalPerMinute: 10_000, webBaseUrl: WEB_ORIGIN, ...over.config };
   const cipher = new TokenCipher({ keys: { k1: Buffer.alloc(32, 5) }, activeKeyId: 'k1' });
   const instagramConnect = over.oauth ? new InstagramConnectService(accounts, over.oauth, cipher, sim.clock, { stateSecret: 'o'.repeat(40), stateMaxAgeMs: 600_000, requiredScopes: ['instagram_business_basic', 'instagram_business_content_publish'] }) : undefined;
   const api = createApi({
