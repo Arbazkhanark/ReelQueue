@@ -142,7 +142,7 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
     return json(201, await d.accounts.mockConnect(principal!.userId, username));
   } });
   const OAUTH_COOKIE = 'rq_oauth';
-  const oauthCookieOpts = { path: '/v1/instagram', httpOnly: true, secure: cfg.secureCookies, sameSite: 'Lax' } as const; // Lax: Meta redirects the browser back with a top-level GET
+  const oauthCookieOpts = { path: '/v1/instagram', httpOnly: true, secure: cfg.secureCookies, sameSite: 'None' } as const; // Lax: Meta redirects the browser back with a top-level GET
   user({ method: 'POST', pattern: '/v1/instagram/connect', limits: [{ name: 'ig-connect', limit: 20, windowMs: HOUR, by: (r) => r.ip }], handler: async ({ principal }) => {
     if (!d.instagramConnect) throw new AppError('NOT_FOUND', 'Instagram connection is not enabled.');
     const { authorizationUrl, nonce } = d.instagramConnect.start(principal!.userId);
