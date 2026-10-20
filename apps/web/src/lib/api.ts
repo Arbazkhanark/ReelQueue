@@ -9,7 +9,7 @@ import type { CallOptions, PathParams } from './http';
 
 export { ApiError, errorMessage, fieldErrors, isApiError } from './http';
 
-export const API_ORIGIN: string = process.env.NEXT_PUBLIC_API_ORIGIN ?? 'http://localhost:4000';
+export const API_ORIGIN: string = process.env.NEXT_PUBLIC_API_ORIGIN ?? 'https://reelqueue-api.onrender.com';
 
 type Routes = typeof ROUTES;
 type ReqOf<S> = S extends { _req?: infer Q } ? Exclude<Q, undefined> : never;
