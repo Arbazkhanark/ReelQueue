@@ -4,6 +4,6 @@
   "private": true,
   "description": "API process: plain Node entrypoint over @reelqueue/http. src/main.ts is UNVERIFIED (needs pg, bullmq, ioredis installed). NOTE: the ADR planned NestJS; see docs/IMPLEMENTATION_STATUS.md for the deviation.",
   "scripts": { "start": "node dist/main.js", "build": "tsc -p tsconfig.json" },
-  "dependencies": { "@reelqueue/core": "workspace:*", "@reelqueue/db": "workspace:*", "@reelqueue/http": "workspace:*", "@reelqueue/integrations": "workspace:*", "@reelqueue/runtime": "workspace:*", "@reelqueue/services": "workspace:*", "bullmq": "^5.0.0", "ioredis": "^5.0.0", "pg": "^8.0.0" },
-  "devDependencies": { "@types/node": "^22.0.0", "@types/pg": "^8.0.0", "typescript": "~6.0.3" }
+  "dependencies": { "@reelqueue/core": "workspace:*", "@reelqueue/db": "workspace:*", "@reelqueue/http": "workspace:*", "@reelqueue/integrations": "workspace:*", "@reelqueue/runtime": "workspace:*", "@reelqueue/services": "workspace:*", "bullmq": "^5.0.0", "ioredis": "^5.0.0", "nodemailer": "^6.9.0", "pg": "^8.0.0" },
+  "devDependencies": { "@types/node": "^22.0.0", "@types/nodemailer": "^6.4.0", "@types/pg": "^8.0.0", "typescript": "~6.0.3" }
 }

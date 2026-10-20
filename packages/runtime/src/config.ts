@@ -34,8 +34,22 @@ export class ConfigError extends Error {
 
 type Env = Record<string, string | undefined>;
 
-export function loadConfig(env: Env): AppConfig {
+/** Maps the EMAIL_ variable names (Nodemailer-style .env) onto the SMTP_ and MAIL_ names; explicit SMTP_/MAIL_ values win. */
+function withEmailAliases(raw: Env, problems: string[]): Env {
+  const e: Env = { ...raw };
+  const set = (k: string, v: string | undefined) => { if (v !== undefined && v.trim() !== '' && !e[k]?.trim()) e[k] = v; };
+  set('SMTP_HOST', raw.EMAIL_HOST); set('SMTP_PORT', raw.EMAIL_PORT); set('SMTP_USER', raw.EMAIL_USER); set('MAIL_FROM', raw.EMAIL_FROM);
+  // Google shows app passwords as "abcd efgh ijkl mnop"; the spaces are cosmetic.
+  set('SMTP_PASS', raw.EMAIL_PASS !== undefined && /^[a-z]{4}( [a-z]{4}){3}$/.test(raw.EMAIL_PASS.trim()) ? raw.EMAIL_PASS.replace(/ /g, '') : raw.EMAIL_PASS?.trim());
+  const sec = raw.EMAIL_SECURE?.trim().toLowerCase();
+  if (sec) { if (['1', 'true', 'yes'].includes(sec)) set('SMTP_SECURITY', 'tls'); else if (['0', 'false', 'no'].includes(sec)) set('SMTP_SECURITY', 'starttls'); else problems.push('EMAIL_SECURE must be true or false'); }
+  if (!e.MAIL_TRANSPORT?.trim() && raw.EMAIL_HOST?.trim()) e.MAIL_TRANSPORT = 'smtp'; // an EMAIL_HOST means "send real mail"
+  return e;
+}
+
+export function loadConfig(rawEnv: Env): AppConfig {
   const problems: string[] = [];
+  const env = withEmailAliases(rawEnv, problems);
   const str = (k: string, o: { required?: boolean; def?: string } = {}): string => {
     const v = env[k]?.trim();
     if (v) return v;

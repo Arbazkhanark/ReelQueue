@@ -9,9 +9,10 @@ import { Redis } from 'ioredis';
 import { join } from 'node:path';
 import { SystemClock } from '@reelqueue/core';
 import { PgSqlExecutor, loadMigrations, runMigrations } from '@reelqueue/db';
-import { S3StorageProvider, SmtpTransport } from '@reelqueue/integrations';
+import nodemailer from 'nodemailer';
+import { S3StorageProvider } from '@reelqueue/integrations';
 import { createApi, createNodeServer } from '@reelqueue/http';
-import { BullWakeQueue, LogMailer, SmtpMailer, QUEUE_NAME, compose, loadConfig, ConfigError } from '@reelqueue/runtime';
+import { BullWakeQueue, LogMailer, NodemailerTransport, SmtpMailer, QUEUE_NAME, compose, loadConfig, ConfigError } from '@reelqueue/runtime';
 
 const log = (level: 'info' | 'error') => (o: Record<string, unknown>, msg: string) => console[level === 'info' ? 'log' : 'error'](JSON.stringify({ level, msg, time: new Date().toISOString(), ...o }));
 const logger = { info: log('info'), error: log('error') };
@@ -33,7 +34,7 @@ async function main(): Promise<void> {
   const queue = new BullWakeQueue(new Queue(QUEUE_NAME, { connection: redis }), () => clock.now(), { info: logger.info, warn: logger.info });
   const storage = new S3StorageProvider({ endpoint: cfg.s3.endpoint, region: cfg.s3.region, bucket: cfg.s3.bucket, credentials: { accessKeyId: cfg.s3.accessKeyId, secretAccessKey: cfg.s3.secretAccessKey }, forcePathStyle: cfg.s3.forcePathStyle }, { clock });
   const mailer = cfg.mail.smtp
-    ? new SmtpMailer(new SmtpTransport(cfg.mail.smtp), cfg.mail.from, cfg.webBaseUrl, (o, m) => logger.error(o, m))
+    ? new SmtpMailer(new NodemailerTransport(nodemailer, cfg.mail.smtp), cfg.mail.from, cfg.webBaseUrl, (o, m) => logger.error(o, m))
     : new LogMailer(logger.info, cfg.webBaseUrl);
   const c = compose({ cfg, db, clock, queue, storage, logger, mailer });
 

@@ -1,5 +1,6 @@
 import type { Mailer } from '@reelqueue/services';
 import { MailError, type MailTransport } from '@reelqueue/integrations';
+import { passwordResetMail, verificationMail, type RenderedMail } from './mail-templates';
 
 /**
  * Development mailer: writes the message (including the one-time link token) to the log. loadConfig REFUSES this transport
@@ -29,15 +30,15 @@ export class SmtpMailer implements Mailer {
   ) {}
 
   sendVerificationEmail(to: string, rawToken: string): Promise<void> {
-    return this.enqueue('verification', to, 'Verify your ReelQueue email', `Welcome to ReelQueue.\n\nConfirm your email address:\n${this.appUrl}/verify-email?token=${encodeURIComponent(rawToken)}\n\nIf you did not create an account you can ignore this message.`);
+    return this.enqueue('verification', to, verificationMail(`${this.appUrl}/verify-email?token=${encodeURIComponent(rawToken)}`));
   }
   sendPasswordResetEmail(to: string, rawToken: string): Promise<void> {
-    return this.enqueue('password-reset', to, 'Reset your ReelQueue password', `Someone asked to reset the password for this account.\n\nChoose a new password:\n${this.appUrl}/reset-password?token=${encodeURIComponent(rawToken)}\n\nThe link expires soon. If this was not you, ignore this message.`);
+    return this.enqueue('password-reset', to, passwordResetMail(`${this.appUrl}/reset-password?token=${encodeURIComponent(rawToken)}`));
   }
-  private enqueue(kind: string, to: string, subject: string, text: string): Promise<void> {
+  private enqueue(kind: string, to: string, mail: RenderedMail): Promise<void> {
     if (this.inFlight >= this.maxInFlight) { this.log({ kind, reason: 'BACKPRESSURE' }, 'mail dropped'); return Promise.resolve(); }
     this.inFlight++;
-    const p = this.transport.send({ from: this.from, to, subject, text })
+    const p = this.transport.send({ from: this.from, to, subject: mail.subject, text: mail.text, html: mail.html })
       .catch((e: unknown) => { this.log(e instanceof MailError ? { kind, failure: e.kind, smtpCode: e.smtpCode } : { kind, failure: 'UNKNOWN' }, 'mail send failed'); })
       .finally(() => { this.inFlight--; this.pending.delete(p); });
     this.pending.add(p);

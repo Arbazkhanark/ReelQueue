@@ -2,7 +2,7 @@ import { connect as netConnect, type Socket } from 'node:net';
 import { connect as tlsConnect, type TLSSocket, type ConnectionOptions } from 'node:tls';
 import { randomUUID } from 'node:crypto';
 
-export interface MailMessage { from: string; to: string; subject: string; text: string }
+export interface MailMessage { from: string; to: string; subject: string; text: string; /** Optional HTML alternative (used by the Nodemailer transport; the built-in SmtpTransport sends text only). */ html?: string }
 export interface MailTransport { send(m: MailMessage): Promise<void> }
 
 export type SmtpSecurity = 'tls' | 'starttls' | 'none';
