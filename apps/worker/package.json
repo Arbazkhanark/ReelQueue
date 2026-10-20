@@ -9,6 +9,21 @@
     "test": "tsx --test \"test/**/*.test.ts\"",
     "start": "node dist/main.js"
   },
-  "dependencies": { "@reelqueue/core": "workspace:*", "@reelqueue/db": "workspace:*", "@reelqueue/integrations": "workspace:*", "@reelqueue/runtime": "workspace:*", "@reelqueue/services": "workspace:*", "bullmq": "^5.0.0", "ioredis": "^5.0.0", "pg": "^8.0.0" },
-  "devDependencies": { "@types/node": "^22.0.0", "@types/pg": "^8.0.0", "tsx": "^4.20.0", "typescript": "~6.0.3" }
+  "dependencies": {
+    "@reelqueue/core": "workspace:*",
+    "@reelqueue/db": "workspace:*",
+    "@reelqueue/integrations": "workspace:*",
+    "@reelqueue/runtime": "workspace:*",
+    "@reelqueue/services": "workspace:*",
+    "bullmq": "^5.0.0",
+    "ioredis": "^5.0.0",
+    "pg": "^8.0.0"
+  },
+  "devDependencies": {
+    "@reelqueue/http": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "~6.0.3"
+  }
 }

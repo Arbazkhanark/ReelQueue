@@ -27,8 +27,17 @@ describe('probeVideo (real ffprobe)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rq-probe-'));
     const bad = join(dir, 'bad.mp4');
     writeFileSync(bad, 'not a video');
+    // await assert.rejects(probeVideo(bad), /ffprobe failed/);
+    // await assert.rejects(probeVideo('relative/path.mp4'), /https URL, localhost HTTP URL, or an absolute path/);
+
     await assert.rejects(probeVideo(bad), /ffprobe failed/);
-    await assert.rejects(probeVideo('relative/path.mp4'), /https URL or an absolute path/);
-    await assert.rejects(probeVideo('http://insecure.example/x.mp4'), /https URL or an absolute path/);
+    await assert.rejects(
+      probeVideo('relative/path.mp4'),
+      /https URL, localhost HTTP URL, or an absolute path/
+    );
+    await assert.rejects(
+      probeVideo('http://insecure.example/x.mp4'),
+      /https URL, localhost HTTP URL, or an absolute path/
+    );
   });
 });

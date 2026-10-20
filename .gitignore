@@ -10,3 +10,6 @@ coverage/
 playwright-report/
 test-results/
 pgdata/
+
+# Local backup files
+*.bak
