@@ -186,11 +186,17 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
     ],
     handler: async ({ principal, requestId }) => {
       d.logger.info({
-        event: 'instagram.oauth.connect.started',
+        event: "instagram.oauth.cookie.set",
         requestId,
+        cookieName: OAUTH_COOKIE,
+        cookiePath: "/v1/instagram",
         userId: principal!.userId,
         providerEnabled: Boolean(d.instagramConnect),
-      }, 'Instagram OAuth connect started');
+        secure: cfg.secureCookies,
+        sameSite: "Lax",
+        maxAgeSeconds: 600,
+        setCookieAddedToResponse: true,
+      }, "Instagram OAuth cookie added to response");
 
       if (!d.instagramConnect) {
         d.logger.error({
@@ -256,6 +262,16 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
       { name: 'ig-callback', limit: 30, windowMs: HOUR },
     ],
     handler: async ({ req, requestId }) => {
+      const cookieHeader = req.headers.cookie ?? "";
+      const cookieNames = cookieHeader.split(";").map((part) => part.trim().split("=")[0]).filter(Boolean);
+
+      d.logger.info({
+        event: "instagram.oauth.cookie.callback_received",
+        requestId,
+        cookieNames,
+        hasOAuthCookie: cookieNames.includes(OAUTH_COOKIE),
+        hasAccessCookie: Boolean(cookieOf(req, AUTH_COOKIES.access)),
+      }, "Instagram OAuth callback cookie diagnostic");
       const base = (
         cfg.webBaseUrl ?? cfg.allowedOrigins[0] ?? ''
       ).replace(/\/+$/, '');
@@ -263,6 +279,13 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
       const back = (q: string): HttpResponse => {
         const res = json(302);
         res.headers.location = `${base}/accounts?${q}`;
+        d.logger.info({
+          event: "instagram.oauth.cookie.clear",
+          requestId,
+          cookieName: OAUTH_COOKIE,
+          cookiePath: "/v1/instagram",
+          redirectQuery: q,
+        }, "Instagram OAuth cookie clear instructed");
         res.cookies.push(clearCookie(OAUTH_COOKIE, oauthCookieOpts));
         return res;
       };
