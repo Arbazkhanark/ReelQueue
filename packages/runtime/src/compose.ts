@@ -62,7 +62,7 @@ export function compose(i: ComposeInput) {
 
   const apiDeps: Omit<ApiDeps, 'checks'> = {
     auth, uploads, read, cycles, clock, logger: i.logger,
-    config: { allowedOrigins: cfg.allowedOrigins, secureCookies: cfg.secureCookies, sameSite: 'Lax', accessTtlSeconds: DEFAULT_AUTH_CONFIG.accessTtlSeconds, refreshTtlSeconds: DEFAULT_AUTH_CONFIG.refreshTtlSeconds, globalPerMinute: 300, webBaseUrl: cfg.webBaseUrl },
+    config: { allowedOrigins: cfg.allowedOrigins, secureCookies: cfg.secureCookies, sameSite: 'None', accessTtlSeconds: DEFAULT_AUTH_CONFIG.accessTtlSeconds, refreshTtlSeconds: DEFAULT_AUTH_CONFIG.refreshTtlSeconds, globalPerMinute: 300, webBaseUrl: cfg.webBaseUrl },
     flow: new UploadFlow(uploads, query, videos, read), settings: new SettingsService(settingsStore, accounts, read),
     accounts: new AccountService(accounts, sched, providers, read, clock, { mockMode }), me: new MeService(auth, sched, cycles),
     limiter, ...(instagramConnect ? { instagramConnect } : {}),
