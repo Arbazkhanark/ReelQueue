@@ -26,6 +26,13 @@ export interface OAuthConfig {
 export const OAUTH_STATE_MAX_AGE_MS = 10 * 60_000;
 /** Account types accepted for publishing. Values from Meta's docs ("Business" | "Media_Creator"); UNVERIFIED against a live account. */
 const PROFESSIONAL_TYPES = new Set(['Business', 'Media_Creator']);
+function normalizeAccountType(value: string | null): string {
+  return (value ?? '')
+    .trim()
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .replace(/[\s-]+/g, '_')
+    .toUpperCase();
+}
 
 export class InstagramConnectService {
   constructor(private readonly accounts: AccountStore, private readonly oauth: OAuthPort, private readonly cipher: TokenCipher, private readonly clock: Clock, private readonly cfg: OAuthConfig, private readonly log: ServiceLogger = { warn: () => undefined }) {}
@@ -142,6 +149,16 @@ export class InstagramConnectService {
         usernamePresent: Boolean(profile.username),
         providerAccountIdPresent: Boolean(profile.userId),
       }, 'Instagram profile fetch succeeded');
+      const accountType = normalizeAccountType(profile.accountType);
+      this.log.warn({
+        event:'instagram.oauth.profile_fetch.succeeded/complete',
+        userId:a.userId,
+        profile:profile,
+        accountType:profile.accountType,
+        usernamePresent:profile.username,
+        providerAccountIdPresent:profile.userId,
+        InstagramAccountType:accountType,
+      },'FETCHING INSTAGRAM PROFILE')
       if (profile.accountType !== null && !PROFESSIONAL_TYPES.has(profile.accountType)){ 
           this.log.warn({
             event: 'instagram.oauth.account_type.rejected',
