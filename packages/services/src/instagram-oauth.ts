@@ -25,7 +25,7 @@ export interface OAuthConfig {
 }
 export const OAUTH_STATE_MAX_AGE_MS = 10 * 60_000;
 /** Account types accepted for publishing. Values from Meta's docs ("Business" | "Media_Creator"); UNVERIFIED against a live account. */
-const PROFESSIONAL_TYPES = new Set(['Business', 'Media_Creator']);
+const PROFESSIONAL_TYPES = new Set(['BUSINESS', 'Media_Creator']);
 function normalizeAccountType(value: string | null): string {
   return (value ?? '')
     .trim()
