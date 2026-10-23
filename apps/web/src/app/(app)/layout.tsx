@@ -11,7 +11,7 @@ import { ThemeToggle } from '@/components/theme';
 
 const NAV = [
   ['/dashboard', 'Dashboard'], ['/uploads', 'Upload'], ['/videos', 'Videos'], ['/cycles', 'Cycles'],
-  ['/jobs', 'Jobs'], ['/accounts', 'Accounts'], ['/settings', 'Settings'],
+  ['/jobs', 'Jobs'], ['/accounts', 'Accounts'], ['/settings', 'Settings'], ['/storage', 'Storage']
 ] as const;
 
 export default function AppLayout({ children }: { children: ReactNode }) {

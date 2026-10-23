@@ -4,6 +4,9 @@ import { MetaInstagramProvider, MetaOAuthClient, probeVideo, type HttpFn } from 
 import { AccountService, AuthService, CompositeProviderResolver, CycleService, DbTokenResolver, DEFAULT_AUTH_CONFIG, DEFAULT_TOKEN_REFRESH_CONFIG, InstagramConnectService, OAUTH_STATE_MAX_AGE_MS, RetentionService, TokenRefreshService, DEFAULT_UPLOAD_CONFIG, MeService, ReadService, SchedulerRunner, SettingsService, StorageMediaUrlProvider, UploadFlow, UploadService, type Mailer, type MediaProbe, type WakeQueue } from '@reelqueue/services';
 import type { ApiDeps, ApiLogger } from '@reelqueue/http';
 import type { AppConfig } from './config';
+import { GFetch,GoogleOAuthClient,DriveClient } from '@reelqueue/integrations/src'
+import { GoogleDriveService } from '@reelqueue/services/src'
+import { GoogleDriveStore } from '@reelqueue/db/src'
 
 export interface ComposeInput {
   cfg: AppConfig; db: SqlExecutor; clock: Clock; queue: WakeQueue; storage: StorageProvider; mailer: Mailer; logger: ApiLogger;
@@ -14,6 +17,8 @@ export interface ComposeInput {
   /** Deterministic randomness for tests; production seeds from the clock. */
   rngSeed?: number;
   mockProvider?: MockInstagramProvider;
+  /** Overridable for tests (fake Google); production uses global fetch. */
+  googleFetch?: GFetch;
 }
 
 /** The one place stores, adapters and services are assembled. Used by the API process AND the worker process. */
@@ -60,12 +65,22 @@ export function compose(i: ComposeInput) {
 
   const retention = new RetentionService(new RetentionStore(db), videos, i.storage, clock, { videoRetentionDays: cfg.retention.videoDays, accountGraceDays: cfg.retention.accountGraceDays }, svcLog);
 
+  // Optional Google Drive integration: built only when GOOGLE_DRIVE_* is configured. S3 wiring above is untouched.
+  let googleDrive: GoogleDriveService | undefined;
+  if (cfg.googleDrive) {
+    const g = cfg.googleDrive; const limits = DEFAULT_UPLOAD_CONFIG.limits; const gf = i.googleFetch ? { fetch: i.googleFetch } : {};
+    googleDrive = new GoogleDriveService(new GoogleDriveStore(db), new GoogleOAuthClient({ clientId: g.clientId, clientSecret: g.clientSecret, redirectUri: g.redirectUri, scopes: g.scopes, requestTimeoutMs: 20_000 }, { now: () => clock.now(), ...gf }),
+      new DriveClient({ requestTimeoutMs: 30_000, maxFileBytes: limits.maxFileBytes }, gf), cipher, clock,
+      { requiredScopes: g.scopes, stateTtlMs: 10 * 60_000, appFolderName: 'ReelQueue', allowedContentTypes: limits.allowedContentTypes, maxFileBytes: limits.maxFileBytes, webOrigin: cfg.webBaseUrl, refreshSkewMs: 60_000 }, svcLog);
+  }
+
   const apiDeps: Omit<ApiDeps, 'checks'> = {
     auth, uploads, read, cycles, clock, logger: i.logger,
     config: { allowedOrigins: cfg.allowedOrigins, secureCookies: true, sameSite: 'None', accessTtlSeconds: DEFAULT_AUTH_CONFIG.accessTtlSeconds, refreshTtlSeconds: DEFAULT_AUTH_CONFIG.refreshTtlSeconds, globalPerMinute: 300, webBaseUrl: cfg.webBaseUrl },
     flow: new UploadFlow(uploads, query, videos, read), settings: new SettingsService(settingsStore, accounts, read),
     accounts: new AccountService(accounts, sched, providers, read, clock, { mockMode }), me: new MeService(auth, sched, cycles),
     limiter, ...(instagramConnect ? { instagramConnect } : {}),
+    ...(googleDrive ? { googleDrive } : {}),
   };
   return { apiDeps, runner, uploads, mockMode, providers, tokenRefresh, retention, rateStore };
 }

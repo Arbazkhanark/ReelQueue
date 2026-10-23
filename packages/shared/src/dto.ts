@@ -255,3 +255,34 @@ export interface AdminFailureDto {
 }
 export interface AdminStorageDto { totalBytesUsed: number; totalVideos: number; topUsers: { userId: string; bytesUsed: number }[] }
 export interface AdminQuotaDto { accounts: { accountId: string; userId: string; used: number | null; total: number | null; fetchedAt: string | null }[] }
+
+
+
+
+
+
+
+// Google Drive DTO
+
+/* ------------------------------------------------------------ Google Drive (optional storage integration) */
+export type GoogleDriveConnectionStatus = 'NOT_CONNECTED' | 'CONNECTED' | 'REAUTH_REQUIRED';
+export interface GoogleDriveStatusDto {
+  /** False when the server has no Google credentials configured: the UI hides the feature. */
+  enabled: boolean;
+  status: GoogleDriveConnectionStatus;
+  scopes: string[];
+  connectedAt: string | null;
+}
+export interface ConnectGoogleDriveResponse { authorizationUrl: string }
+export interface DriveFileDto {
+  id: string; name: string; mimeType: string; sizeBytes: number | null; modifiedTime: string | null; createdTime: string | null;
+  isFolder: boolean;
+  /** True for files ReelQueue created itself (only those can be deleted through the API). */
+  managedByReelQueue: boolean;
+}
+export interface DriveFileListDto { files: DriveFileDto[]; nextPageToken: string | null }
+export interface StartDriveUploadRequest { filename: string; contentType: string; sizeBytes: number }
+export interface StartDriveUploadResponse {
+  /** Resumable-upload session URL: the browser PUTs the file bytes here (in chunks) and never sends a Google token to ReelQueue. */
+  sessionUri: string;
+}

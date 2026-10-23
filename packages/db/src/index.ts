@@ -8,3 +8,4 @@ export * from './pg-executor';
 export * from './migrator';
 export * from './rate-limit-store';
 export * from './retention-store';
+export * from './google-drive-store';

@@ -16,5 +16,9 @@ export interface HttpResponse {
   cookies: string[];
   /** JSON-serialisable; omitted for 204. */
   body?: unknown;
+
+  // Google Drive HTTPS
+  /** Optional raw byte stream (used by file downloads). When set, `body` is ignored and the adapter pipes the stream with back-pressure. */
+  stream?: AsyncIterable<Uint8Array>;
 }
 export const json = (status: number, body?: unknown): HttpResponse => ({ status, headers: {}, cookies: [], ...(body === undefined ? {} : { body }) });

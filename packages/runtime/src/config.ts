@@ -20,6 +20,10 @@ export interface AppConfig {
   oauth: { appId: string; appSecret: string; redirectUri: string; scopes: string[]; stateSecret: string } | null;
   /** Where the browser lands after the OAuth callback and what mail links point to (a single exact origin). */
   webBaseUrl: string;
+  /** Optional Google Drive integration (additional to S3, never a replacement). null = disabled; S3 and startup are unaffected. */
+  googleDrive: { clientId: string; clientSecret: string; redirectUri: string; scopes: string[] } | null;
+  /** Primary object storage for the upload/publish pipeline. Only 's3' exists; Drive is a separate integration (docs/GOOGLE_DRIVE.md). */
+  storageProvider: 's3';
   s3: { endpoint: string; region: string; bucket: string; accessKeyId: string; secretAccessKey: string; forcePathStyle: boolean };
   mailTransport: 'log' | 'smtp';
   mail: { from: string; smtp: { host: string; port: number; security: 'tls' | 'starttls' | 'none'; user?: string; pass?: string; helo: string; timeoutMs: number } | null };
@@ -134,6 +138,22 @@ export function loadConfig(rawEnv: Env): AppConfig {
     oauth = { appId: str('META_APP_ID'), appSecret: str('META_APP_SECRET'), redirectUri, scopes, stateSecret };
   }
   if (prod && provider === 'mock') problems.push('INSTAGRAM_PROVIDER=mock is not allowed in production');
+
+
+  // Google Drive: optional, all-or-nothing. Never broadens the OAuth scope silently.
+  const DRIVE_SCOPES_ALLOWED = ['https://www.googleapis.com/auth/drive.file'];
+  let googleDrive: AppConfig['googleDrive'] = null;
+  const gdVars = ['GOOGLE_DRIVE_CLIENT_ID', 'GOOGLE_DRIVE_CLIENT_SECRET', 'GOOGLE_DRIVE_REDIRECT_URI'].filter((k) => env[k]?.trim());
+  if (gdVars.length > 0) {
+    const redirectUri = str('GOOGLE_DRIVE_REDIRECT_URI');
+    try { const u = new URL(redirectUri); if (u.pathname !== '/v1/google-drive/callback') problems.push('GOOGLE_DRIVE_REDIRECT_URI must end with /v1/google-drive/callback'); if (prod && u.protocol !== 'https:') problems.push('GOOGLE_DRIVE_REDIRECT_URI must be https in production'); if (u.hash || u.search) problems.push('GOOGLE_DRIVE_REDIRECT_URI must not contain a query or fragment'); }
+    catch { if (redirectUri) problems.push('GOOGLE_DRIVE_REDIRECT_URI is not a valid URL'); }
+    const scopes = str('GOOGLE_DRIVE_SCOPES', { def: DRIVE_SCOPES_ALLOWED[0]! }).split(/[\s,]+/).filter(Boolean);
+    if (scopes.length === 0 || scopes.some((x) => !DRIVE_SCOPES_ALLOWED.includes(x))) problems.push('GOOGLE_DRIVE_SCOPES may only contain https://www.googleapis.com/auth/drive.file (broader scopes need a deliberate code change and Google verification)');
+    googleDrive = { clientId: str('GOOGLE_DRIVE_CLIENT_ID'), clientSecret: str('GOOGLE_DRIVE_CLIENT_SECRET'), redirectUri, scopes };
+  }
+  const storageProvider = str('STORAGE_PROVIDER', { def: 's3' });
+  if (storageProvider !== 's3') problems.push('STORAGE_PROVIDER must be "s3" (Google Drive is an additional integration, not a replacement for the upload/publish storage)');
 
   const cfg: AppConfig = {
     nodeEnv: nodeEnv as AppConfig['nodeEnv'],

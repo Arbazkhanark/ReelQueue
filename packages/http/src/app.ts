@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { hashToken, parseCookies, serializeCookie, clearCookie, type Clock, type RateLimiter } from '@reelqueue/core';
 import type { UserRow } from '@reelqueue/db';
 import {
-  AccountService, AuthService, CycleService, InstagramConnectService, MeService, ReadService, SettingsService, UploadFlow, UploadService, type SessionTokens,
+  AccountService, AuthService, CycleService, InstagramConnectService, MeService, ReadService, SettingsService, UploadFlow, UploadService, type SessionTokens
 } from '@reelqueue/services';
 import { API_ERROR_STATUS, AUTH_COOKIES, AppError, type ApiErrorBody, type UserDto } from '@reelqueue/shared';
 import { json, type HttpRequest, type HttpResponse } from './http';
 import { Router, type Principal, type RouteDef } from './router';
 import { Fields, queryEnum, queryInt, uuidParam } from './validate';
+import { GoogleDriveService } from '@reelqueue/services/src'
 
 export interface ApiConfig {
   /** Exact origins of the web app (e.g. https://app.example.com). Cross-origin requests from anywhere else are refused. */
@@ -28,6 +29,10 @@ export interface ApiDeps {
   checks: { database(): Promise<boolean>; redis(): Promise<boolean> };
   /** Present only when INSTAGRAM_PROVIDER=meta. Without it the connect routes behave as not enabled. */
   instagramConnect?: InstagramConnectService;
+
+  // Google Drive Connect
+  /** Present only when GOOGLE_DRIVE_* is configured. Without it every Drive route except /status behaves as not enabled. */
+  googleDrive?: GoogleDriveService;
 }
 
 const toUserDto = (u: UserRow): UserDto => ({
@@ -410,6 +415,51 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
   });
   user({ method: 'POST', pattern: '/v1/instagram/accounts/:id/disconnect', handler: async ({ params, principal }) => json(200, await d.accounts.disconnect(principal!.userId, uuidParam(params.id, 'Instagram account'))) });
   user({ method: 'POST', pattern: '/v1/instagram/accounts/:id/refresh-quota', limits: [{ name: 'quota', limit: 30, windowMs: HOUR }], handler: async ({ params, principal }) => json(200, await d.accounts.refreshQuota(principal!.userId, uuidParam(params.id, 'Instagram account'))) });
+
+
+
+  /* ------------------------------------------------------------GoogleDrive  */
+  /* ---------------------------------------------------------- google drive (optional) */
+  const gd = (): GoogleDriveService => { if (!d.googleDrive) throw new AppError('NOT_FOUND', 'Google Drive is not enabled.'); return d.googleDrive; };
+  const DRIVE_ID = /^[A-Za-z0-9_-]{10,128}$/;
+  const driveId = (v: string | undefined): string => { if (!v || !DRIVE_ID.test(v)) throw new AppError('NOT_FOUND', 'File not found.'); return v; };
+  user({ method: 'GET', pattern: '/v1/google-drive/status', handler: async ({ principal }) => json(200, d.googleDrive ? await d.googleDrive.status(principal!.userId) : { enabled: false, status: 'NOT_CONNECTED', scopes: [], connectedAt: null }) });
+  user({ method: 'POST', pattern: '/v1/google-drive/connect', limits: [{ name: 'gd-connect', limit: 20, windowMs: HOUR }], handler: async ({ principal }) => json(200, await gd().start(principal!.userId)) });
+  // Browser redirect from Google. The state (single use, hashed in the DB, bound to the user) AND the logged-in session must agree.
+  // Every outcome is a redirect to the web app with a code from a fixed set; Google-provided text is never echoed.
+  open({ method: 'GET', pattern: '/v1/google-drive/callback', limits: [{ name: 'gd-callback', limit: 30, windowMs: HOUR }], handler: async ({ req }) => {
+    const base = (cfg.webBaseUrl ?? cfg.allowedOrigins[0] ?? '').replace(/\/+$/, '');
+    const back = (q: string): HttpResponse => { const r = json(302); r.headers.location = `${base}/storage?${q}`; return r; };
+    if (!d.googleDrive) return back('error=NOT_ENABLED');
+    if (req.query.error !== undefined) return back('error=ACCESS_DENIED');
+    const code = req.query.code, state = req.query.state;
+    if (!code || !state || code.length > 2048 || state.length > 512) return back('error=STATE_INVALID');
+    let p: Principal;
+    try { p = await d.auth.authenticate(cookieOf(req, AUTH_COOKIES.access)); } catch { return back('error=SESSION'); }
+    const r = await d.googleDrive.complete({ sessionUserId: p.userId, code, state });
+    return back(r.ok ? 'connected=1' : `error=${r.reason}`);
+  } });
+  user({ method: 'GET', pattern: '/v1/google-drive/files', limits: [{ name: 'gd-list', limit: 600, windowMs: HOUR }], handler: async ({ req, principal }) => {
+    const size = queryInt(req.query, 'pageSize', { min: 1, max: 100 }); const tok = req.query.pageToken;
+    if (tok !== undefined && !/^[\x21-\x7e]{1,2048}$/.test(tok)) throw new AppError('VALIDATION_FAILED', 'Invalid input.', [{ field: 'pageToken', message: 'Invalid page token.' }]);
+    return json(200, await gd().list(principal!.userId, { ...(size !== undefined ? { pageSize: size } : {}), ...(tok ? { pageToken: tok } : {}) }));
+  } });
+  user({ method: 'GET', pattern: '/v1/google-drive/files/:id', limits: [{ name: 'gd-get', limit: 600, windowMs: HOUR }], handler: async ({ params, principal }) => json(200, await gd().get(principal!.userId, driveId(params.id))) });
+  user({ method: 'POST', pattern: '/v1/google-drive/uploads', limits: [{ name: 'gd-upload', limit: 60, windowMs: HOUR }], handler: async ({ req, principal }) => {
+    const f = new Fields(req.body); const filename = f.str('filename', { max: 255 }); const contentType = f.str('contentType', { max: 100 }); const sizeBytes = f.int('sizeBytes', { min: 1, max: Number.MAX_SAFE_INTEGER }); f.done();
+    return json(200, await gd().startUpload(principal!.userId, { filename, contentType, sizeBytes }));
+  } });
+  user({ method: 'GET', pattern: '/v1/google-drive/files/:id/content', limits: [{ name: 'gd-download', limit: 120, windowMs: HOUR }], handler: async ({ params, principal }) => {
+    const f = await gd().openDownload(principal!.userId, driveId(params.id));
+    const res = json(200); res.stream = f.stream;
+    // Always an opaque attachment: Drive content is user-controlled, so it must never render as a page in our origin.
+    res.headers['content-type'] = 'application/octet-stream';
+    res.headers['content-disposition'] = `attachment; filename="${f.name.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'file'}"; filename*=UTF-8''${encodeURIComponent(f.name)}`;
+    if (f.sizeBytes !== null) res.headers['content-length'] = String(f.sizeBytes);
+    return res;
+  } });
+  user({ method: 'DELETE', pattern: '/v1/google-drive/files/:id', limits: [{ name: 'gd-delete', limit: 120, windowMs: HOUR }], handler: async ({ params, principal }) => { await gd().delete(principal!.userId, driveId(params.id)); return json(204); } });
+  user({ method: 'DELETE', pattern: '/v1/google-drive/connection', limits: [{ name: 'gd-disconnect', limit: 30, windowMs: HOUR }], handler: async ({ principal }) => { await gd().disconnect(principal!.userId); return json(204); } });
 
   /* --------------------------------------------------------------- uploads */
   user({ method: 'POST', pattern: '/v1/uploads/init', limits: [{ name: 'upload-init', limit: 60, windowMs: HOUR }], handler: async ({ req, principal }) => {

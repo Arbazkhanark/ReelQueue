@@ -72,6 +72,18 @@ export const ROUTES = {
 
   healthLive: r<void, { status: 'ok' }>('GET', '/health/live', 'none'),
   healthReady: r<void, { status: 'ok' | 'degraded'; database: 'up' | 'down'; redis: 'up' | 'down' }>('GET', '/health/ready', 'none'),
+
+
+  // Google Drive Routes
+  googleDriveStatus: r<void, D.GoogleDriveStatusDto>('GET', '/v1/google-drive/status', 'user'),
+  connectGoogleDrive: r<void, D.ConnectGoogleDriveResponse>('POST', '/v1/google-drive/connect', 'user'),
+  googleDriveCallback: r<void, void>('GET', '/v1/google-drive/callback', 'none'), // browser redirect; state is validated
+  listDriveFiles: r<void, D.DriveFileListDto>('GET', '/v1/google-drive/files', 'user'),
+  getDriveFile: r<void, D.DriveFileDto>('GET', '/v1/google-drive/files/:id', 'user'),
+  startDriveUpload: r<D.StartDriveUploadRequest, D.StartDriveUploadResponse>('POST', '/v1/google-drive/uploads', 'user'),
+  downloadDriveFile: r<void, void>('GET', '/v1/google-drive/files/:id/content', 'user'), // streamed bytes, not JSON
+  deleteDriveFile: r<void, void>('DELETE', '/v1/google-drive/files/:id', 'user'),
+  disconnectGoogleDrive: r<void, void>('DELETE', '/v1/google-drive/connection', 'user'),
 } as const;
 
 export type RouteName = keyof typeof ROUTES;

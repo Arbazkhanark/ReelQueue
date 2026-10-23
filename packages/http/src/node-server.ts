@@ -13,7 +13,27 @@ async function readBody(req: IncomingMessage, max: number): Promise<Buffer | 'TO
   return Buffer.concat(chunks);
 }
 
+  //Google Drive
+  /** Pipes a byte stream with back-pressure; stops pulling (and releases the source) if the client goes away. Never buffers the whole body. */
+  async function sendStream(res: ServerResponse, r: HttpResponse): Promise<void> {
+    const headers: Record<string, string | string[]> = { ...r.headers };
+    if (r.cookies.length) headers['set-cookie'] = r.cookies;
+    res.writeHead(r.status, headers);
+    const it = r.stream![Symbol.asyncIterator]();
+    let closed = false;
+    res.once('close', () => { closed = true; void it.return?.(); });
+    try {
+      while (!closed) {
+        const n = await it.next();
+        if (n.done) break;
+        if (!res.write(n.value) && !closed) await new Promise<void>((ok) => { res.once('drain', ok); res.once('close', ok); });
+      }
+      if (!closed) res.end();
+    } catch { res.destroy(); } // headers are already sent: the only honest signal left is a truncated response
+  }
+
 function send(res: ServerResponse, r: HttpResponse): void {
+  if (r.stream) { void sendStream(res, r); return; }
   const payload = r.body === undefined ? undefined : JSON.stringify(r.body);
   const headers: Record<string, string | string[]> = { ...r.headers };
   if (r.cookies.length) headers['set-cookie'] = r.cookies;

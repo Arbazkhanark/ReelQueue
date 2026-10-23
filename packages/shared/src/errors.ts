@@ -27,6 +27,10 @@ export const API_ERROR_CODES = [
   'JOB_NOT_RETRYABLE',
   'MOCK_ONLY', // endpoint only available with INSTAGRAM_PROVIDER=mock
   'INTERNAL',
+  // Google Drive Errors
+  'GOOGLE_DRIVE_NOT_CONNECTED',
+  'GOOGLE_DRIVE_REAUTH_REQUIRED',
+  'GOOGLE_DRIVE_UNAVAILABLE', // Google Drive refused or could not be reached (never carries Google's text)
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
@@ -69,6 +73,10 @@ export const API_ERROR_STATUS: Record<ApiErrorCode, number> = {
   JOB_NOT_RETRYABLE: 409,
   MOCK_ONLY: 404,
   INTERNAL: 500,
+  // Google Drive Error Codes
+  GOOGLE_DRIVE_NOT_CONNECTED: 409,
+  GOOGLE_DRIVE_REAUTH_REQUIRED: 409,
+  GOOGLE_DRIVE_UNAVAILABLE: 502,
 };
 
 /** Thrown by services; the API layer maps it to HTTP using API_ERROR_STATUS. */
