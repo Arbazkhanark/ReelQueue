@@ -686,6 +686,24 @@ import { Router, type Principal, type RouteDef } from './router';
 import { Fields, queryEnum, queryInt, uuidParam } from './validate';
 import { GoogleDriveService } from '@reelqueue/services'
 
+
+
+  // NEW: HTTP headers ko case-insensitive read karta hai.
+  function getRequestHeader(
+    headers: Record<string, string | undefined>,
+    headerName: string,
+  ): string | undefined {
+    const target = headerName.toLowerCase();
+
+    for (const [name, value] of Object.entries(headers)) {
+      if (name.toLowerCase() === target) {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
 export interface ApiConfig {
   /** Exact origins of the web app (e.g. https://app.example.com). Cross-origin requests from anywhere else are refused. */
   allowedOrigins: readonly string[];
@@ -1147,32 +1165,128 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
     }
   });
   user({ method: 'GET', pattern: '/v1/google-drive/files/:id', limits: [{ name: 'gd-get', limit: 600, windowMs: HOUR }], handler: async ({ params, principal }) => json(200, await gd().get(principal!.userId, driveId(params.id))) });
+  //OLD CODE ::
+  // user({
+  //   method: 'POST', pattern: '/v1/google-drive/uploads', limits: [{ name: 'gd-upload', limit: 60, windowMs: HOUR }], handler: async ({ req, principal }) => {
+  //     // CHANGED: metadata travels in query params; the request body is the raw video bytes.
+  //     // This avoids custom headers that would require extra CORS allow-list entries.
+  //     const filename = req.query.filename;
+  //     const contentType = req.query.contentType;
+  //     const sizeHeader = req.headers['content-length'];
+  //     const sizeBytes = sizeHeader && /^\\d+$/.test(sizeHeader) ? Number(sizeHeader) : NaN;
+  //     if (!filename || filename.length > 255 || !contentType || contentType.length > 100) {
+  //       throw new AppError('VALIDATION_FAILED', 'Invalid upload metadata.');
+  //     }
+  //     if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0) {
+  //       throw new AppError('VALIDATION_FAILED', 'Missing or invalid Content-Length.');
+  //     }
+  //     if (!req.rawBody || req.rawBody.byteLength !== sizeBytes) {
+  //       throw new AppError('VALIDATION_FAILED', 'Upload body is missing or incomplete.');
+  //     }
+  //     const drive = gd() as GoogleDriveService & {
+  //       upload?: (userId: string, metadata: { filename: string; contentType: string; sizeBytes: number }, body: Buffer | Uint8Array) => Promise<unknown>;
+  //       uploadFile?: (userId: string, metadata: { filename: string; contentType: string; sizeBytes: number }, body: Buffer | Uint8Array) => Promise<unknown>;
+  //       createFile?: (userId: string, metadata: { filename: string; contentType: string; sizeBytes: number }, body: Buffer | Uint8Array) => Promise<unknown>;
+  //     };
+  //     const doUpload = drive.upload ?? drive.uploadFile ?? drive.createFile;
+  //     if (!doUpload) throw new AppError('NOT_FOUND', 'Google Drive upload is not supported.');
+  //     return json(201, await doUpload.call(drive, principal!.userId, { filename, contentType, sizeBytes }, req.rawBody));
+  //   }
+  // });
+  
+  // CHANGED: Google Drive binary upload route.
   user({
-    method: 'POST', pattern: '/v1/google-drive/uploads', limits: [{ name: 'gd-upload', limit: 60, windowMs: HOUR }], handler: async ({ req, principal }) => {
-      // CHANGED: metadata travels in query params; the request body is the raw video bytes.
-      // This avoids custom headers that would require extra CORS allow-list entries.
+    method: 'POST',
+    pattern: '/v1/google-drive/uploads',
+    limits: [
+      {
+        name: 'gd-upload',
+        limit: 60,
+        windowMs: HOUR,
+      },
+    ],
+    handler: async ({ req, principal }) => {
       const filename = req.query.filename;
       const contentType = req.query.contentType;
-      const sizeHeader = req.headers['content-length'];
-      const sizeBytes = sizeHeader && /^\\d+$/.test(sizeHeader) ? Number(sizeHeader) : NaN;
-      if (!filename || filename.length > 255 || !contentType || contentType.length > 100) {
-        throw new AppError('VALIDATION_FAILED', 'Invalid upload metadata.');
+
+      // CHANGED: Read Content-Length case-insensitively.
+      const contentLengthHeader = getRequestHeader(
+        req.headers,
+        'content-length',
+      );
+
+      if (
+        !contentLengthHeader ||
+        !/^\d+$/.test(contentLengthHeader)
+      ) {
+        throw new AppError(
+          'VALIDATION_FAILED',
+          'Missing or invalid Content-Length.',
+        );
       }
-      if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0) {
-        throw new AppError('VALIDATION_FAILED', 'Missing or invalid Content-Length.');
+
+      const sizeBytes = Number(contentLengthHeader);
+
+      if (
+        !Number.isSafeInteger(sizeBytes) ||
+        sizeBytes <= 0
+      ) {
+        throw new AppError(
+          'VALIDATION_FAILED',
+          'Missing or invalid Content-Length.',
+        );
       }
-      if (!req.rawBody || req.rawBody.byteLength !== sizeBytes) {
-        throw new AppError('VALIDATION_FAILED', 'Upload body is missing or incomplete.');
+
+      // NEW: Raw video bytes must reach the route.
+      if (!req.rawBody) {
+        throw new AppError(
+          'VALIDATION_FAILED',
+          'Missing binary upload body.',
+        );
       }
-      const drive = gd() as GoogleDriveService & {
-        upload?: (userId: string, metadata: { filename: string; contentType: string; sizeBytes: number }, body: Buffer | Uint8Array) => Promise<unknown>;
-        uploadFile?: (userId: string, metadata: { filename: string; contentType: string; sizeBytes: number }, body: Buffer | Uint8Array) => Promise<unknown>;
-        createFile?: (userId: string, metadata: { filename: string; contentType: string; sizeBytes: number }, body: Buffer | Uint8Array) => Promise<unknown>;
-      };
-      const doUpload = drive.upload ?? drive.uploadFile ?? drive.createFile;
-      if (!doUpload) throw new AppError('NOT_FOUND', 'Google Drive upload is not supported.');
-      return json(201, await doUpload.call(drive, principal!.userId, { filename, contentType, sizeBytes }, req.rawBody));
-    }
+
+      // NEW: Confirm declared size matches received bytes.
+      if (req.rawBody.byteLength !== sizeBytes) {
+        throw new AppError(
+          'VALIDATION_FAILED',
+          'Uploaded byte count does not match Content-Length.',
+        );
+      }
+
+      if (
+        !filename ||
+        filename.length > 255
+      ) {
+        throw new AppError(
+          'VALIDATION_FAILED',
+          'Invalid filename.',
+        );
+      }
+
+      if (
+        !contentType ||
+        contentType.length > 100
+      ) {
+        throw new AppError(
+          'VALIDATION_FAILED',
+          'Invalid content type.',
+        );
+      }
+
+      // NEW: Upload bytes through the backend to Google Drive.
+      return json(
+        201,
+        await gd().uploadFile(
+          principal!.userId,
+          {
+            filename,
+            contentType,
+            sizeBytes,
+          },
+          req.rawBody,
+        ),
+      );
+    },
   });
   user({
     method: 'GET', pattern: '/v1/google-drive/files/:id/content', limits: [{ name: 'gd-download', limit: 120, windowMs: HOUR }], handler: async ({ params, principal }) => {

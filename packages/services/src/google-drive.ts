@@ -216,9 +216,10 @@ import type { ServiceLogger } from './upload-service';
 
 /** Structural ports: tests inject fakes, production injects the real clients. */
 export type GoogleOAuthPort = Pick<GoogleOAuthClient, 'buildAuthorizationUrl' | 'exchangeCode' | 'refresh' | 'revoke'>;
-export type DrivePort = Pick<DriveClient, 'aboutUser' | 'getFile' | 'listFiles' | 'findAppFolder' | 'createFolder' | 'startResumableUpload' | 'download' | 'deleteFile'> & {
-  uploadToSession: (sessionUri: string, bytes: Uint8Array, mimeType: string) => Promise<DriveFile>;
-};
+export type DrivePort = Pick<DriveClient, 'aboutUser' | 'getFile' | 'listFiles' | 'findAppFolder' | 'createFolder' | 'startResumableUpload' | 'uploadToSession' | 'download' | 'deleteFile'> ;
+// & {
+//   uploadToSession: (sessionUri: string, bytes: Uint8Array, mimeType: string) => Promise<DriveFile>;
+// };
 
 export interface GoogleDriveConfig {
   /** Scopes that must have been granted (the user can untick granular permissions on Google's consent screen). */
@@ -371,27 +372,40 @@ export class GoogleDriveService {
     });
   }
   // NEW: Complete the upload on the server. The resumable session URL is never returned to the browser.
-  async uploadFile(userId: string, f: { filename: string; contentType: string; sizeBytes: number }, bytes: Uint8Array): Promise<DriveFileDto> {
-    const name = cleanName(f.filename);
-    const mimeType = f.contentType.split(';')[0]!.trim().toLowerCase();
-    if (!name || name.length > 255) throw new AppError('VALIDATION_FAILED', 'Invalid file name.');
-    if (!this.cfg.allowedContentTypes.includes(mimeType)) throw new AppError('UNSUPPORTED_MEDIA', 'This file type is not supported.');
-    if (!Number.isInteger(f.sizeBytes) || f.sizeBytes <= 0 || bytes.byteLength !== f.sizeBytes) {
-      throw new AppError('VALIDATION_FAILED', 'Uploaded file size does not match the request.');
+    // NEW: Uploads the actual binary file through the backend to Google Drive.
+  async uploadFile(
+    userId: string,
+    f: {
+      filename: string;
+      contentType: string;
+      sizeBytes: number;
+    },
+    bytes: Uint8Array,
+  ): Promise<DriveFileDto> {
+    // NEW: Verify declared file size against the actual received bytes.
+    if (bytes.byteLength !== f.sizeBytes) {
+      throw new AppError(
+        'VALIDATION_FAILED',
+        'Uploaded byte count does not match the declared file size.',
+      );
     }
-    if (f.sizeBytes > this.cfg.maxFileBytes) throw new AppError('UPLOAD_LIMIT_EXCEEDED', 'File is larger than the allowed size.');
 
-    const file = await this.call(userId, async (token) => {
-      const parentId = await this.ensureFolder(userId, token);
-      const session = await this.drive.startResumableUpload(token, {
-        name,
-        mimeType,
-        sizeBytes: f.sizeBytes,
-        parentId,
-      });
-      return this.drive.uploadToSession(session.sessionUri, bytes, mimeType);
-    });
-    return toDto(file);
+    // Reuse existing validation, folder creation and resumable-session logic.
+    const { sessionUri } = await this.startUpload(userId, f);
+
+    try {
+      // NEW: Send bytes from the backend to Google, avoiding browser CORS.
+      const uploaded = await this.drive.uploadToSession(
+        sessionUri,
+        bytes,
+        f.contentType,
+      );
+
+      // Return the same DTO format used by the existing Drive file endpoints.
+      return toDto(uploaded);
+    } catch (error) {
+      throw this.mapError(error);
+    }
   }
 
   private async ensureFolder(userId: string, token: string): Promise<string> {
