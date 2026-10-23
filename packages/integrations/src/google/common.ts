@@ -65,7 +65,7 @@
 
 
 
-
+// packages/integrations/src/google/common.ts
 // Shared plumbing for the Google clients: minimal fetch type (tests can inject a fake), sanitised errors, retry/backoff.
 export interface GFetchResponse {
   status: number;

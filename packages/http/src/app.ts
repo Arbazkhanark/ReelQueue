@@ -1170,7 +1170,7 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
   user({
     method: 'POST',
     pattern: '/v1/google-drive/files/:id/import',
-    limits: [{ name: 'gd-import', limit: 20, windowMs: HOUR }],
+    limits: [{ name: 'gd-import', limit: 500, windowMs: HOUR }],
     handler: async ({ params, principal }) => {
       const userId = principal!.userId;
       const fileId = driveId(params.id);

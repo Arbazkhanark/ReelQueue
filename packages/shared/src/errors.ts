@@ -1,3 +1,4 @@
+// packages/shared/src/errors.ts
 /** Stable, machine-readable error codes. The web app switches on these, never on messages. */
 export const API_ERROR_CODES = [
   'VALIDATION_FAILED',

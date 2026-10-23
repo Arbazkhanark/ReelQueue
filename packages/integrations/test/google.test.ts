@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { GoogleOAuthClient, DriveClient, GoogleApiError, pkceChallenge, newPkceVerifier, assertDriveId, type GFetch, type GFetchResponse } from '../src';
 
 type Reply = { status?: number; body?: unknown; raw?: string; headers?: Record<string, string>; stream?: AsyncIterable<Uint8Array> };
-interface Call { url: string; method: string; headers: Record<string, string>; body?: string }
+interface Call { url: string; method: string; headers: Record<string, string>; body?: string | Uint8Array }
 function fake(replies: Reply[]) {
   const calls: Call[] = [];
   const fetch: GFetch = async (url, init) => {

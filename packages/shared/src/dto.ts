@@ -1,3 +1,4 @@
+// packages/shared/src/dto.ts
 import type { CycleStatus, JobStatus, ProviderKind } from '@reelqueue/core';
 
 export type { CycleStatus, JobStatus, ProviderKind };

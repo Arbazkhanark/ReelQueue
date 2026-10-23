@@ -1,3 +1,4 @@
+// packages/shared/src/routes.ts
 import type * as D from './dto';
 
 /**
@@ -81,6 +82,7 @@ export const ROUTES = {
   listDriveFiles: r<void, D.DriveFileListDto>('GET', '/v1/google-drive/files', 'user'),
   getDriveFile: r<void, D.DriveFileDto>('GET', '/v1/google-drive/files/:id', 'user'),
   startDriveUpload: r<D.StartDriveUploadRequest, D.StartDriveUploadResponse>('POST', '/v1/google-drive/uploads', 'user'),
+  importDriveFile: r<void, { video: D.VideoDto }>('POST', '/v1/google-drive/files/:id/import', 'user'),
   downloadDriveFile: r<void, void>('GET', '/v1/google-drive/files/:id/content', 'user'), // streamed bytes, not JSON
   deleteDriveFile: r<void, void>('DELETE', '/v1/google-drive/files/:id', 'user'),
   disconnectGoogleDrive: r<void, void>('DELETE', '/v1/google-drive/connection', 'user'),
