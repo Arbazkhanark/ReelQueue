@@ -7,6 +7,8 @@ export interface HttpRequest {
   headers: Record<string, string | undefined>;
   /** Parsed JSON body (undefined when none). */
   body: unknown;
+  // NEW: Binary uploads are passed as raw bytes instead of being JSON-parsed.
+  rawBody?: Uint8Array;
   ip: string;
 }
 export interface HttpResponse {

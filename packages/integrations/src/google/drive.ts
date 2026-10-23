@@ -146,7 +146,7 @@
 
 
 
-
+// packages/integrations/google/drive.ts
 import { classify, defaultFetch, DEFAULT_RETRY, GoogleApiError, parseJson, send, withRetry, type GFetch, type RetryOptions } from './common';
 
 /**
@@ -277,7 +277,7 @@ export class DriveClient {
           'content-type': contentType,
           'content-length': String(body.byteLength),
         },
-        body: body as unknown as string,
+        body, // CHANGED: pass the actual Uint8Array to fetch; do not coerce binary data to a string.
       }); 
       if (res.status < 200 || res.status >= 300) {
         throw classify(res.status, parseJson(text), res.headers.get('retry-after'));
