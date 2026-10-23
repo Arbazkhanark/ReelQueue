@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { hashToken, type Clock, type TokenCipher } from '@reelqueue/core';
-import type { GoogleDriveStore } from '@reelqueue/db/src/google-drive-store';
-import { GoogleApiError, pkceChallenge, newPkceVerifier, type DriveClient, type DriveFile, type GoogleOAuthClient } from '@reelqueue/integrations/src';
-import { AppError, type DriveFileDto, type DriveFileListDto, type GoogleDriveStatusDto } from '@reelqueue/shared/src';
+import type { GoogleDriveStore } from '@reelqueue/db';
+import { GoogleApiError, pkceChallenge, newPkceVerifier, type DriveClient, type DriveFile, type GoogleOAuthClient } from '@reelqueue/integrations';
+import { AppError, type DriveFileDto, type DriveFileListDto, type GoogleDriveStatusDto } from '@reelqueue/shared';
 import type { ServiceLogger } from './upload-service';
 
 /** Structural ports: tests inject fakes, production injects the real clients. */

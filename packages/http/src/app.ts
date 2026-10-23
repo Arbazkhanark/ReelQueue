@@ -8,7 +8,7 @@ import { API_ERROR_STATUS, AUTH_COOKIES, AppError, type ApiErrorBody, type UserD
 import { json, type HttpRequest, type HttpResponse } from './http';
 import { Router, type Principal, type RouteDef } from './router';
 import { Fields, queryEnum, queryInt, uuidParam } from './validate';
-import { GoogleDriveService } from '@reelqueue/services/src'
+import { GoogleDriveService } from '@reelqueue/services'
 
 export interface ApiConfig {
   /** Exact origins of the web app (e.g. https://app.example.com). Cross-origin requests from anywhere else are refused. */

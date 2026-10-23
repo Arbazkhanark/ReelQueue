@@ -4,9 +4,9 @@ import { MetaInstagramProvider, MetaOAuthClient, probeVideo, type HttpFn } from 
 import { AccountService, AuthService, CompositeProviderResolver, CycleService, DbTokenResolver, DEFAULT_AUTH_CONFIG, DEFAULT_TOKEN_REFRESH_CONFIG, InstagramConnectService, OAUTH_STATE_MAX_AGE_MS, RetentionService, TokenRefreshService, DEFAULT_UPLOAD_CONFIG, MeService, ReadService, SchedulerRunner, SettingsService, StorageMediaUrlProvider, UploadFlow, UploadService, type Mailer, type MediaProbe, type WakeQueue } from '@reelqueue/services';
 import type { ApiDeps, ApiLogger } from '@reelqueue/http';
 import type { AppConfig } from './config';
-import { GFetch,GoogleOAuthClient,DriveClient } from '@reelqueue/integrations/src'
-import { GoogleDriveService } from '@reelqueue/services/src'
-import { GoogleDriveStore } from '@reelqueue/db/src'
+import { GFetch,GoogleOAuthClient,DriveClient } from '@reelqueue/integrations'
+import { GoogleDriveService } from '@reelqueue/services'
+import { GoogleDriveStore } from '@reelqueue/db'
 
 export interface ComposeInput {
   cfg: AppConfig; db: SqlExecutor; clock: Clock; queue: WakeQueue; storage: StorageProvider; mailer: Mailer; logger: ApiLogger;
