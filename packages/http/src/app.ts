@@ -689,6 +689,31 @@ import { Readable } from 'node:stream';
 
 
 
+// Safe diagnostics for the Drive import: never log or return URLs (presigned URLs carry a signature).
+const redactUrls = (s: string): string => s.replace(/https?:\/\/\S+/gi, '[url]').slice(0, 300);
+function describeError(e: unknown): { name: string; message: string; code?: string } {
+  if (e instanceof Error) {
+    const cause = (e as { cause?: unknown }).cause as { code?: unknown } | undefined;
+    const own = (e as { code?: unknown }).code;
+    const code = typeof own === 'string' ? own : cause && typeof cause.code === 'string' ? cause.code : undefined;
+    return { name: e.name, message: redactUrls(e.message), ...(code ? { code } : {}) };
+  }
+  return { name: 'NonError', message: 'unknown' };
+}
+/** Collects a stream into one buffer and checks it has exactly the expected number of bytes. */
+async function readAll(stream: AsyncIterable<Uint8Array>, expected: number): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  let n = 0;
+  for await (const c of stream) {
+    n += c.byteLength;
+    if (n > expected) throw new Error('Drive stream exceeds declared size');
+    chunks.push(c);
+  }
+  if (n !== expected) throw new Error('Drive stream size mismatch');
+  return Buffer.concat(chunks, n);
+}
+const IMPORT_BUFFER_LIMIT = 64 * 1024 * 1024; // up to 64 MiB is held in memory (S3 needs a known Content-Length); larger files are streamed
+
   // NEW: HTTP headers ko case-insensitive read karta hai.
   function getRequestHeader(
     headers: Record<string, string | undefined>,
@@ -1167,11 +1192,144 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
   });
   user({ method: 'GET', pattern: '/v1/google-drive/files/:id', limits: [{ name: 'gd-get', limit: 600, windowMs: HOUR }], handler: async ({ params, principal }) => json(200, await gd().get(principal!.userId, driveId(params.id))) });
 
-  user({
+  // user({
+  //   method: 'POST',
+  //   pattern: '/v1/google-drive/files/:id/import',
+  //   limits: [{ name: 'gd-import', limit: 500, windowMs: HOUR }],
+  //   handler: async ({ params, principal }) => {
+  //     const userId = principal!.userId;
+  //     const fileId = driveId(params.id);
+
+  //     // Read metadata first; only regular MP4/MOV video files are supported.
+  //     const file = await gd().get(userId, fileId);
+  //     const allowedTypes = new Set(['video/mp4', 'video/quicktime']);
+  //     const contentType = file.mimeType.toLowerCase().trim();
+  //     const sizeBytes = file.sizeBytes;
+
+  //     if (file.isFolder || !allowedTypes.has(contentType)) {
+  //       throw new AppError(
+  //         'VALIDATION_FAILED',
+  //         'Only MP4 and MOV video files can be imported.',
+  //       );
+  //     }
+
+  //     if (
+  //       typeof sizeBytes !== 'number' ||
+  //       !Number.isSafeInteger(sizeBytes) ||
+  //       sizeBytes <= 0 ||
+  //       sizeBytes > 1024 ** 3
+  //     ) {
+  //       throw new AppError(
+  //         'VALIDATION_FAILED',
+  //         'The video has a missing, invalid, or unsupported file size.',
+  //       );
+  //     }
+
+  //     // Reserve quota and create the normal ReelQueue video record.
+  //     const batch = await d.uploads.createBatch(userId, [{
+  //       filename: file.name,
+  //       contentType,
+  //       sizeBytes,
+  //     }]);
+
+  //     const target = batch.uploads[0];
+  //     if (!target) {
+  //       throw new AppError(
+  //         'VALIDATION_FAILED',
+  //         batch.rejected[0]?.message ?? 'The video cannot be imported.',
+  //       );
+  //     }
+
+  //     try {
+  //       const source = await gd().openDownload(userId, fileId);
+
+  //       if (
+  //         source.sizeBytes !== null &&
+  //         source.sizeBytes !== sizeBytes
+  //       ) {
+  //         throw new AppError(
+  //           'VALIDATION_FAILED',
+  //           'Google Drive file size changed. Please try again.',
+  //         );
+  //       }
+
+  //       // Stream the source directly to S3/R2 without buffering the whole video.
+  //       const iterator = source.stream[Symbol.asyncIterator]();
+  //       let transferred = 0;
+
+  //       const body = new ReadableStream<Uint8Array>({
+  //         async pull(controller) {
+  //           try {
+  //             const next = await iterator.next();
+
+  //             if (next.done) {
+  //               if (transferred !== sizeBytes) {
+  //                 controller.error(new Error('Drive stream size mismatch'));
+  //                 return;
+  //               }
+  //               controller.close();
+  //               return;
+  //             }
+
+  //             transferred += next.value.byteLength;
+
+  //             if (transferred > sizeBytes) {
+  //               controller.error(new Error('Drive stream exceeds declared size'));
+  //               return;
+  //             }
+
+  //             controller.enqueue(next.value);
+  //           } catch (error) {
+  //             controller.error(error);
+  //           }
+  //         },
+  //         async cancel() {
+  //           await iterator.return?.();
+  //         },
+  //       });
+
+  //       const response = await fetch(target.url, {
+  //         method: 'PUT',
+  //         headers: target.headers,
+  //         body,
+  //         duplex: 'half',
+  //       } as RequestInit & { duplex: 'half' });
+
+  //       if (!response.ok) {
+  //         throw new AppError(
+  //           'INTERNAL',
+  //           'Could not transfer the video to storage. Please try again.',
+  //         );
+  //       }
+
+  //       // Existing service verifies object size/type and probes the real media.
+  //       const result = await d.uploads.complete(userId, target.videoId);
+
+  //       if (result.status !== 'READY') {
+  //         throw new AppError(
+  //           'VALIDATION_FAILED',
+  //           result.reason ?? 'The imported file did not pass video validation.',
+  //         );
+  //       }
+
+  //       return json(201, {
+  //         video: (await d.read.videoDtos(userId, [result.video]))[0],
+  //       });
+  //     } catch (error) {
+  //       // Release the reservation and remove any partial object on failure.
+  //       await d.uploads.failClientUpload(userId, target.videoId).catch(() => undefined);
+  //       throw error;
+  //     }
+  //   },
+  // });
+
+
+
+    user({
     method: 'POST',
     pattern: '/v1/google-drive/files/:id/import',
     limits: [{ name: 'gd-import', limit: 500, windowMs: HOUR }],
-    handler: async ({ params, principal }) => {
+    handler: async ({ params, principal, requestId }) => {
       const userId = principal!.userId;
       const fileId = driveId(params.id);
 
@@ -1182,122 +1340,92 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
       const sizeBytes = file.sizeBytes;
 
       if (file.isFolder || !allowedTypes.has(contentType)) {
-        throw new AppError(
-          'VALIDATION_FAILED',
-          'Only MP4 and MOV video files can be imported.',
-        );
+        throw new AppError('VALIDATION_FAILED', 'Only MP4 and MOV video files can be imported.');
       }
-
-      if (
-        typeof sizeBytes !== 'number' ||
-        !Number.isSafeInteger(sizeBytes) ||
-        sizeBytes <= 0 ||
-        sizeBytes > 1024 ** 3
-      ) {
-        throw new AppError(
-          'VALIDATION_FAILED',
-          'The video has a missing, invalid, or unsupported file size.',
-        );
+      if (typeof sizeBytes !== 'number' || !Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > 1024 ** 3) {
+        throw new AppError('VALIDATION_FAILED', 'The video has a missing, invalid, or unsupported file size.');
       }
 
       // Reserve quota and create the normal ReelQueue video record.
-      const batch = await d.uploads.createBatch(userId, [{
-        filename: file.name,
-        contentType,
-        sizeBytes,
-      }]);
-
+      const batch = await d.uploads.createBatch(userId, [{ filename: file.name, contentType, sizeBytes }]);
       const target = batch.uploads[0];
       if (!target) {
-        throw new AppError(
-          'VALIDATION_FAILED',
-          batch.rejected[0]?.message ?? 'The video cannot be imported.',
-        );
+        throw new AppError('VALIDATION_FAILED', batch.rejected[0]?.message ?? 'The video cannot be imported.');
       }
 
+      let stage = 'drive-download';
       try {
         const source = await gd().openDownload(userId, fileId);
-
-        if (
-          source.sizeBytes !== null &&
-          source.sizeBytes !== sizeBytes
-        ) {
-          throw new AppError(
-            'VALIDATION_FAILED',
-            'Google Drive file size changed. Please try again.',
-          );
+        if (source.sizeBytes !== null && source.sizeBytes !== sizeBytes) {
+          throw new AppError('VALIDATION_FAILED', 'Google Drive file size changed. Please try again.');
         }
 
-        // Stream the source directly to S3/R2 without buffering the whole video.
-        const iterator = source.stream[Symbol.asyncIterator]();
-        let transferred = 0;
-
-        const body = new ReadableStream<Uint8Array>({
-          async pull(controller) {
-            try {
-              const next = await iterator.next();
-
-              if (next.done) {
-                if (transferred !== sizeBytes) {
-                  controller.error(new Error('Drive stream size mismatch'));
+        let body: Uint8Array | ReadableStream<Uint8Array>;;
+        let streaming = false;
+        if (sizeBytes <= IMPORT_BUFFER_LIMIT) {
+          // body = (await readAll(source.stream, sizeBytes)) as unknown as BodyInit; // known length: S3/R2 accept this
+          body = await readAll(source.stream, sizeBytes);
+        } else {
+          streaming = true;
+          const iterator = source.stream[Symbol.asyncIterator]();
+          let transferred = 0;
+          body = new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              try {
+                const next = await iterator.next();
+                if (next.done) {
+                  if (transferred !== sizeBytes) { controller.error(new Error('Drive stream size mismatch')); return; }
+                  controller.close();
                   return;
                 }
-                controller.close();
-                return;
-              }
+                transferred += next.value.byteLength;
+                if (transferred > sizeBytes) { controller.error(new Error('Drive stream exceeds declared size')); return; }
+                controller.enqueue(next.value);
+              } catch (error) { controller.error(error); }
+            },
+            async cancel() { await iterator.return?.(); },
+          });
+        }
 
-              transferred += next.value.byteLength;
-
-              if (transferred > sizeBytes) {
-                controller.error(new Error('Drive stream exceeds declared size'));
-                return;
-              }
-
-              controller.enqueue(next.value);
-            } catch (error) {
-              controller.error(error);
-            }
-          },
-          async cancel() {
-            await iterator.return?.();
-          },
-        });
-
+        stage = 'storage-upload';
         const response = await fetch(target.url, {
           method: 'PUT',
-          headers: target.headers,
+          headers: streaming ? { ...target.headers, 'content-length': String(sizeBytes) } : target.headers,
           body,
-          duplex: 'half',
-        } as RequestInit & { duplex: 'half' });
-
+          ...(streaming ? { duplex: 'half' } : {}),
+        } as RequestInit);
         if (!response.ok) {
-          throw new AppError(
-            'INTERNAL',
-            'Could not transfer the video to storage. Please try again.',
-          );
+          const text = await response.text().catch(() => '');
+          const s3Code = /<Code>([A-Za-z0-9_]{1,64})<\/Code>/.exec(text)?.[1];
+          throw new AppError('INTERNAL', `Storage rejected the upload (HTTP ${response.status}${s3Code ? `, ${s3Code}` : ''}). Check the S3_* settings on the API.`);
         }
 
         // Existing service verifies object size/type and probes the real media.
-        const result = await d.uploads.complete(userId, target.videoId);
-
+        stage = 'verify';
+        let result;
+        try {
+          result = await d.uploads.complete(userId, target.videoId);
+        } catch (e) {
+          if (e instanceof AppError) throw e;
+          const info = describeError(e);
+          d.logger.error({ event: 'drive.import.verify_failed', requestId, errName: info.name, errCode: info.code, errMessage: info.message }, 'video verification threw');
+          throw new AppError('INTERNAL', `The video was copied but could not be checked (${info.code ?? info.name}). If this says ENOENT, ffprobe is not installed on the API server.`);
+        }
         if (result.status !== 'READY') {
-          throw new AppError(
-            'VALIDATION_FAILED',
-            result.reason ?? 'The imported file did not pass video validation.',
-          );
+          throw new AppError('VALIDATION_FAILED', result.reason ?? 'The imported file did not pass video validation.');
         }
 
-        return json(201, {
-          video: (await d.read.videoDtos(userId, [result.video]))[0],
-        });
+        return json(201, { video: (await d.read.videoDtos(userId, [result.video]))[0] });
       } catch (error) {
         // Release the reservation and remove any partial object on failure.
         await d.uploads.failClientUpload(userId, target.videoId).catch(() => undefined);
-        throw error;
+        if (error instanceof AppError) throw error;
+        const info = describeError(error);
+        d.logger.error({ event: 'drive.import.failed', requestId, stage, errName: info.name, errCode: info.code, errMessage: info.message }, 'google drive import failed');
+        throw new AppError('INTERNAL', `Import failed at "${stage}" (${info.code ?? info.name}).`);
       }
     },
   });
-
 
   // CHANGED: Google Drive binary upload route.
   user({
