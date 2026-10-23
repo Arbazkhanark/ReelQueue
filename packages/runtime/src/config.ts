@@ -152,7 +152,7 @@ export function loadConfig(rawEnv: Env): AppConfig {
     if (scopes.length === 0 || scopes.some((x) => !DRIVE_SCOPES_ALLOWED.includes(x))) problems.push('GOOGLE_DRIVE_SCOPES may only contain https://www.googleapis.com/auth/drive.file (broader scopes need a deliberate code change and Google verification)');
     googleDrive = { clientId: str('GOOGLE_DRIVE_CLIENT_ID'), clientSecret: str('GOOGLE_DRIVE_CLIENT_SECRET'), redirectUri, scopes };
   }
-  const storageProvider = str('STORAGE_PROVIDER', { def: 's3' });
+  const storageProvider = str('STORAGE_PROVIDER', { def: 's3' }) as AppConfig['storageProvider'];
   if (storageProvider !== 's3') problems.push('STORAGE_PROVIDER must be "s3" (Google Drive is an additional integration, not a replacement for the upload/publish storage)');
 
   const cfg: AppConfig = {
@@ -160,11 +160,21 @@ export function loadConfig(rawEnv: Env): AppConfig {
     port: int('PORT', 4000, 1, 65535),
     databaseUrl: str('DATABASE_URL'),
     redisUrl: str('REDIS_URL'),
-    allowedOrigins: origins, secureCookies, trustProxy: bool('TRUST_PROXY', false),
-    jwtSecret, tokenKeys, tokenActiveKeyId,
-    instagramProvider: provider === 'meta' ? 'meta' : 'mock', meta, oauth, webBaseUrl,
+    allowedOrigins: origins,
+    secureCookies,
+    trustProxy: bool('TRUST_PROXY', false),
+    jwtSecret,
+    tokenKeys,
+    tokenActiveKeyId,
+    instagramProvider: provider === 'meta' ? 'meta' : 'mock',
+    meta,
+    oauth,
+    webBaseUrl,
+    googleDrive,
+    storageProvider,
     s3: { endpoint: str('S3_ENDPOINT'), region: str('S3_REGION', { def: 'auto' }), bucket: str('S3_BUCKET'), accessKeyId: str('S3_ACCESS_KEY_ID'), secretAccessKey: str('S3_SECRET_ACCESS_KEY'), forcePathStyle: bool('S3_FORCE_PATH_STYLE', true) },
-    mailTransport: mailTransport === 'smtp' ? 'smtp' : 'log', mail: { from: mailFrom, smtp },
+    mailTransport: mailTransport === 'smtp' ? 'smtp' : 'log',
+    mail: { from: mailFrom, smtp },
     retention: { videoDays: int('RETENTION_VIDEO_DAYS', 30, 1, 3650), accountGraceDays: int('RETENTION_ACCOUNT_GRACE_DAYS', 14, 1, 365), intervalMs: int('RETENTION_INTERVAL_MS', 3_600_000, 60_000, 86_400_000) },
     worker: { concurrency: int('WORKER_CONCURRENCY', 5, 1, 100), sweepIntervalMs: int('SWEEP_INTERVAL_MS', 30_000, 1000, 3_600_000), sweepJitterMs: int('SWEEP_JITTER_MS', 5000, 0, 60_000) },
     migrateOnBoot: bool('MIGRATE_ON_BOOT', !prod),
