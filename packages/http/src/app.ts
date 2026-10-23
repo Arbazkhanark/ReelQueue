@@ -685,6 +685,7 @@ import { json, type HttpRequest, type HttpResponse } from './http';
 import { Router, type Principal, type RouteDef } from './router';
 import { Fields, queryEnum, queryInt, uuidParam } from './validate';
 import { GoogleDriveService } from '@reelqueue/services'
+import { Readable } from 'node:stream';
 
 
 
@@ -1165,35 +1166,139 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
     }
   });
   user({ method: 'GET', pattern: '/v1/google-drive/files/:id', limits: [{ name: 'gd-get', limit: 600, windowMs: HOUR }], handler: async ({ params, principal }) => json(200, await gd().get(principal!.userId, driveId(params.id))) });
-  //OLD CODE ::
-  // user({
-  //   method: 'POST', pattern: '/v1/google-drive/uploads', limits: [{ name: 'gd-upload', limit: 60, windowMs: HOUR }], handler: async ({ req, principal }) => {
-  //     // CHANGED: metadata travels in query params; the request body is the raw video bytes.
-  //     // This avoids custom headers that would require extra CORS allow-list entries.
-  //     const filename = req.query.filename;
-  //     const contentType = req.query.contentType;
-  //     const sizeHeader = req.headers['content-length'];
-  //     const sizeBytes = sizeHeader && /^\\d+$/.test(sizeHeader) ? Number(sizeHeader) : NaN;
-  //     if (!filename || filename.length > 255 || !contentType || contentType.length > 100) {
-  //       throw new AppError('VALIDATION_FAILED', 'Invalid upload metadata.');
-  //     }
-  //     if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0) {
-  //       throw new AppError('VALIDATION_FAILED', 'Missing or invalid Content-Length.');
-  //     }
-  //     if (!req.rawBody || req.rawBody.byteLength !== sizeBytes) {
-  //       throw new AppError('VALIDATION_FAILED', 'Upload body is missing or incomplete.');
-  //     }
-  //     const drive = gd() as GoogleDriveService & {
-  //       upload?: (userId: string, metadata: { filename: string; contentType: string; sizeBytes: number }, body: Buffer | Uint8Array) => Promise<unknown>;
-  //       uploadFile?: (userId: string, metadata: { filename: string; contentType: string; sizeBytes: number }, body: Buffer | Uint8Array) => Promise<unknown>;
-  //       createFile?: (userId: string, metadata: { filename: string; contentType: string; sizeBytes: number }, body: Buffer | Uint8Array) => Promise<unknown>;
-  //     };
-  //     const doUpload = drive.upload ?? drive.uploadFile ?? drive.createFile;
-  //     if (!doUpload) throw new AppError('NOT_FOUND', 'Google Drive upload is not supported.');
-  //     return json(201, await doUpload.call(drive, principal!.userId, { filename, contentType, sizeBytes }, req.rawBody));
-  //   }
-  // });
-  
+
+  user({
+    method: 'POST',
+    pattern: '/v1/google-drive/files/:id/import',
+    limits: [{ name: 'gd-import', limit: 20, windowMs: HOUR }],
+    handler: async ({ params, principal }) => {
+      const userId = principal!.userId;
+      const fileId = driveId(params.id);
+
+      // Read metadata first; only regular MP4/MOV video files are supported.
+      const file = await gd().get(userId, fileId);
+      const allowedTypes = new Set(['video/mp4', 'video/quicktime']);
+      const contentType = file.mimeType.toLowerCase().trim();
+      const sizeBytes = file.sizeBytes;
+
+      if (file.isFolder || !allowedTypes.has(contentType)) {
+        throw new AppError(
+          'VALIDATION_FAILED',
+          'Only MP4 and MOV video files can be imported.',
+        );
+      }
+
+      if (
+        typeof sizeBytes !== 'number' ||
+        !Number.isSafeInteger(sizeBytes) ||
+        sizeBytes <= 0 ||
+        sizeBytes > 1024 ** 3
+      ) {
+        throw new AppError(
+          'VALIDATION_FAILED',
+          'The video has a missing, invalid, or unsupported file size.',
+        );
+      }
+
+      // Reserve quota and create the normal ReelQueue video record.
+      const batch = await d.uploads.createBatch(userId, [{
+        filename: file.name,
+        contentType,
+        sizeBytes,
+      }]);
+
+      const target = batch.uploads[0];
+      if (!target) {
+        throw new AppError(
+          'VALIDATION_FAILED',
+          batch.rejected[0]?.message ?? 'The video cannot be imported.',
+        );
+      }
+
+      try {
+        const source = await gd().openDownload(userId, fileId);
+
+        if (
+          source.sizeBytes !== null &&
+          source.sizeBytes !== sizeBytes
+        ) {
+          throw new AppError(
+            'VALIDATION_FAILED',
+            'Google Drive file size changed. Please try again.',
+          );
+        }
+
+        // Stream the source directly to S3/R2 without buffering the whole video.
+        const iterator = source.stream[Symbol.asyncIterator]();
+        let transferred = 0;
+
+        const body = new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            try {
+              const next = await iterator.next();
+
+              if (next.done) {
+                if (transferred !== sizeBytes) {
+                  controller.error(new Error('Drive stream size mismatch'));
+                  return;
+                }
+                controller.close();
+                return;
+              }
+
+              transferred += next.value.byteLength;
+
+              if (transferred > sizeBytes) {
+                controller.error(new Error('Drive stream exceeds declared size'));
+                return;
+              }
+
+              controller.enqueue(next.value);
+            } catch (error) {
+              controller.error(error);
+            }
+          },
+          async cancel() {
+            await iterator.return?.();
+          },
+        });
+
+        const response = await fetch(target.url, {
+          method: 'PUT',
+          headers: target.headers,
+          body,
+          duplex: 'half',
+        } as RequestInit & { duplex: 'half' });
+
+        if (!response.ok) {
+          throw new AppError(
+            'INTERNAL',
+            'Could not transfer the video to storage. Please try again.',
+          );
+        }
+
+        // Existing service verifies object size/type and probes the real media.
+        const result = await d.uploads.complete(userId, target.videoId);
+
+        if (result.status !== 'READY') {
+          throw new AppError(
+            'VALIDATION_FAILED',
+            result.reason ?? 'The imported file did not pass video validation.',
+          );
+        }
+
+        return json(201, {
+          video: (await d.read.videoDtos(userId, [result.video]))[0],
+        });
+      } catch (error) {
+        // Release the reservation and remove any partial object on failure.
+        await d.uploads.failClientUpload(userId, target.videoId).catch(() => undefined);
+        throw error;
+      }
+    },
+  });
+
+
   // CHANGED: Google Drive binary upload route.
   user({
     method: 'POST',

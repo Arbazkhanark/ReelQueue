@@ -1,3 +1,4 @@
+// packages/src/http.ts
 export interface HttpRequest {
   method: string;
   /** Path only, no query string. */
