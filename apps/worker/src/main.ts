@@ -1,3 +1,4 @@
+// apps/worker/src/main.ts
 /**
  * UNVERIFIED: depends on `pg`, `bullmq`, `ioredis` (npm registry was blocked). Excluded from tsconfig until they are installed.
  * The logic it wires (BullWakeQueue, makeProcessor, Sweeper, SchedulerRunner, PublishExecutor) is tested with fakes and real PostgreSQL.

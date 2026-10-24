@@ -41,9 +41,21 @@ export interface MetaProviderConfig {
   requestTimeoutMs: number;
 }
 
+// interface MetaErrorBody {
+//   error?: { message?: string; type?: string; code?: number; error_subcode?: number };
+// }
+
 interface MetaErrorBody {
-  error?: { message?: string; type?: string; code?: number; error_subcode?: number };
+  error?: { message?: string; type?: string; code?: number; error_subcode?: number; fbtrace_id?: string };
 }
+
+export interface ProviderLogger {
+  info(o: Record<string, unknown>, msg: string): void;
+  error(o: Record<string, unknown>, msg: string): void;
+}
+/** Log-safe text: never a URL, never a token. */
+export const redactForLog = (s: string): string =>
+  s.replace(/https?:\/\/\S+/gi, '[url]').replace(/access_token=[^&\s"']+/gi, 'access_token=[redacted]').replace(/\b(?:IG|EA)[A-Za-z0-9_-]{20,}\b/g, '[token]').slice(0, 300);
 
 /** Meta error code -> our taxonomy. UNVERIFIED mapping (see header). */
 export function classifyMetaError(httpStatus: number, body: MetaErrorBody | null, retryAfterMs?: number): ProviderError {
@@ -79,17 +91,52 @@ export class MetaInstagramProvider implements InstagramProvider {
 
   constructor(
     private readonly cfg: MetaProviderConfig,
-    private readonly deps: { tokens: TokenResolver; clock: Clock; http?: HttpFn },
+    private readonly deps: { tokens: TokenResolver; clock: Clock; http?: HttpFn; logger?: ProviderLogger },
   ) {}
 
-  private async call<T>(accountId: string, method: 'GET' | 'POST', path: (c: MetaCredentials) => string, params: Record<string, string>): Promise<T> {
+  // private async call<T>(accountId: string, method: 'GET' | 'POST', path: (c: MetaCredentials) => string, params: Record<string, string>): Promise<T> {
+  //   const creds = await this.deps.tokens.resolve(accountId);
+  //   const form = new URLSearchParams({ ...params, access_token: creds.accessToken });
+  //   const base = `${this.cfg.baseUrl}/${this.cfg.graphVersion}${path(creds)}`;
+  //   const url = method === 'GET' ? `${base}?${form.toString()}` : base;
+  //   const ctl = new AbortController();
+  //   const timer = setTimeout(() => ctl.abort(), this.cfg.requestTimeoutMs);
+  //   const http: HttpFn = this.deps.http ?? ((u, i) => fetch(u, i));
+  //   try {
+  //     const res = await http(url, {
+  //       method,
+  //       headers: method === 'POST' ? { 'content-type': 'application/x-www-form-urlencoded' } : {},
+  //       ...(method === 'POST' ? { body: form.toString() } : {}),
+  //       signal: ctl.signal,
+  //     });
+  //     const text = await res.text();
+  //     let json: unknown = null;
+  //     try { json = text ? JSON.parse(text) : null; } catch { json = null; }
+  //     if (res.status < 200 || res.status >= 300) throw classifyMetaError(res.status, json as MetaErrorBody | null, retryAfter(res.headers));
+  //     if (json === null || typeof json !== 'object') throw new ProviderError('UNKNOWN', 'Instagram API returned an unreadable response', { httpStatus: res.status });
+  //     return json as T;
+  //   } catch (e) {
+  //     if (e instanceof ProviderError) throw e;
+  //     // Abort or network failure: the request MAY have reached Meta. Never include the underlying message (may contain the URL).
+  //     throw new ProviderError('TIMEOUT', 'No usable response from the Instagram API');
+  //   } finally {
+  //     clearTimeout(timer);
+  //   }
+  // }
+
+
+
+    private async call<T>(accountId: string, method: 'GET' | 'POST', path: (c: MetaCredentials) => string, params: Record<string, string>): Promise<T> {
     const creds = await this.deps.tokens.resolve(accountId);
     const form = new URLSearchParams({ ...params, access_token: creds.accessToken });
-    const base = `${this.cfg.baseUrl}/${this.cfg.graphVersion}${path(creds)}`;
+    const rawPath = path(creds);
+    const op = `${method} ${rawPath.replace(/\/\d+/g, '/:id')}`; // ids removed: safe to log
+    const base = `${this.cfg.baseUrl}/${this.cfg.graphVersion}${rawPath}`;
     const url = method === 'GET' ? `${base}?${form.toString()}` : base;
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), this.cfg.requestTimeoutMs);
     const http: HttpFn = this.deps.http ?? ((u, i) => fetch(u, i));
+    const startedAt = Date.now();
     try {
       const res = await http(url, {
         method,
@@ -100,12 +147,31 @@ export class MetaInstagramProvider implements InstagramProvider {
       const text = await res.text();
       let json: unknown = null;
       try { json = text ? JSON.parse(text) : null; } catch { json = null; }
-      if (res.status < 200 || res.status >= 300) throw classifyMetaError(res.status, json as MetaErrorBody | null, retryAfter(res.headers));
-      if (json === null || typeof json !== 'object') throw new ProviderError('UNKNOWN', 'Instagram API returned an unreadable response', { httpStatus: res.status });
+      const ms = Date.now() - startedAt;
+      if (res.status < 200 || res.status >= 300) {
+        const err = (json as MetaErrorBody | null)?.error;
+        this.deps.logger?.error({
+          event: 'meta.api.error', accountId, op, httpStatus: res.status, ms,
+          metaCode: err?.code, metaSubcode: err?.error_subcode, metaType: err?.type, fbtraceId: err?.fbtrace_id,
+          metaMessage: typeof err?.message === 'string' ? redactForLog(err.message) : undefined,
+          unreadableBody: json === null ? true : undefined,
+        }, 'Instagram API returned an error');
+        throw classifyMetaError(res.status, json as MetaErrorBody | null, retryAfter(res.headers));
+      }
+      if (json === null || typeof json !== 'object') {
+        this.deps.logger?.error({ event: 'meta.api.unreadable', accountId, op, httpStatus: res.status, ms }, 'Instagram API returned an unreadable response');
+        throw new ProviderError('UNKNOWN', 'Instagram API returned an unreadable response', { httpStatus: res.status });
+      }
+      this.deps.logger?.info({ event: 'meta.api.ok', accountId, op, httpStatus: res.status, ms }, 'Instagram API call succeeded');
       return json as T;
     } catch (e) {
       if (e instanceof ProviderError) throw e;
       // Abort or network failure: the request MAY have reached Meta. Never include the underlying message (may contain the URL).
+      const cause = (e as { cause?: { code?: unknown } }).cause;
+      this.deps.logger?.error({
+        event: 'meta.api.network_error', accountId, op, timedOut: ctl.signal.aborted, ms: Date.now() - startedAt,
+        errName: e instanceof Error ? e.name : 'unknown', errCode: typeof cause?.code === 'string' ? cause.code : undefined,
+      }, 'Instagram API request failed before a response');
       throw new ProviderError('TIMEOUT', 'No usable response from the Instagram API');
     } finally {
       clearTimeout(timer);
@@ -118,6 +184,10 @@ export class MetaInstagramProvider implements InstagramProvider {
     const row = r.data?.[0];
     const used = row?.quota_usage, total = row?.config?.quota_total, windowSeconds = row?.config?.quota_duration;
     if (typeof used !== 'number' || typeof total !== 'number' || typeof windowSeconds !== 'number') {
+        this.deps.logger?.error({
+          event: 'meta.quota.unexpected_shape', accountId, dataIsArray: Array.isArray(r.data), dataLength: Array.isArray(r.data) ? r.data.length : undefined,
+          usageType: typeof used, totalType: typeof total, durationType: typeof windowSeconds,
+        }, 'Instagram quota response had an unexpected shape');
       // Fail closed: the scheduler treats a thrown error as QUOTA_UNKNOWN and publishes nothing.
       throw new ProviderError('UNKNOWN', 'Instagram quota response had an unexpected shape');
     }

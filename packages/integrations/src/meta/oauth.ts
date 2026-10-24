@@ -31,13 +31,20 @@ export interface MetaOAuthConfig {
 }
 const DEFAULT_HOSTS = { authorize: 'https://www.instagram.com', token: 'https://api.instagram.com', graph: 'https://graph.instagram.com' };
 
+
+interface OAuthLogger {
+  info(fields: Record<string, unknown>, message: string): void;
+  error(fields: Record<string, unknown>, message: string): void;
+}
+
+
 export interface ShortLivedToken { accessToken: string; userId: string; permissions: string[] }
 export interface LongLivedToken { accessToken: string; expiresAt: Date; issuedAt: Date }
 export interface InstagramProfile { userId: string; username: string | null; accountType: string | null }
 
 export class MetaOAuthClient {
   private readonly hosts: { authorize: string; token: string; graph: string };
-  constructor(private readonly cfg: MetaOAuthConfig, private readonly deps: { clock: Clock; http?: HttpFn }) {
+  constructor(private readonly cfg: MetaOAuthConfig, private readonly deps: { clock: Clock; http?: HttpFn; logger? :OAuthLogger; }) {
     this.hosts = cfg.hosts ?? DEFAULT_HOSTS;
   }
 
@@ -103,7 +110,7 @@ export class MetaOAuthClient {
         } | null;
 
         const metaError = payload?.error;
-        console.log({
+        this.deps.logger?.error({
             event: 'instagram.oauth.token_exchange_failed',
             step,
             httpStatus: res.status,
@@ -113,14 +120,19 @@ export class MetaOAuthClient {
           },
           'Instagram OAuth token exchange failed',
         );
-
-
         
         // classify as VALIDATION unless Meta's regular error envelope says otherwise.
         // const e = classifyMetaError(res.status, (json as { error?: { code?: number } } | null));
         // throw new ProviderError(e.kind === 'UNKNOWN' ? 'VALIDATION' : e.kind, `Instagram OAuth ${step} failed (HTTP ${res.status})`, { httpStatus: res.status, ...(e.code ? { code: e.code } : {}) });
         
           const e = classifyMetaError(res.status, payload);
+          this.deps.logger?.error({
+            event:'failed error',
+            step,
+            metaError:metaError,
+            classifyMetaError,
+            errorMessage:e.message   
+          },'Instagram OAuth token exchange failed')
           throw new ProviderError(
             e.kind === 'UNKNOWN' ? 'VALIDATION' : e.kind,
             `Instagram OAuth ${step} failed (HTTP ${res.status})`,

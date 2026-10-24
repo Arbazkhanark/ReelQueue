@@ -35,7 +35,8 @@ export function compose(i: ComposeInput) {
   let meta: InstagramProvider | undefined;
   if (cfg.instagramProvider === 'meta') {
     if (!cfg.meta) throw new Error('META config missing');
-    meta = new MetaInstagramProvider(cfg.meta, { tokens: new DbTokenResolver(accounts, cipher), clock, ...(i.metaHttp ? { http: i.metaHttp } : {}) });
+    // meta = new MetaInstagramProvider(cfg.meta, { tokens: new DbTokenResolver(accounts, cipher), clock, ...(i.metaHttp ? { http: i.metaHttp } : {}) });
+    meta = new MetaInstagramProvider(cfg.meta, { tokens: new DbTokenResolver(accounts, cipher), clock, logger: i.logger, ...(i.metaHttp ? { http: i.metaHttp } : {}) });
   }
   // In meta mode the mock provider is still resolvable for MOCK accounts, but the API cannot create them (AccountService gate).
   const providers: ProviderResolver = new CompositeProviderResolver({ mock, ...(meta ? { meta } : {}) });
@@ -89,5 +90,19 @@ export function compose(i: ComposeInput) {
     limiter, ...(instagramConnect ? { instagramConnect } : {}),
     ...(googleDrive ? { googleDrive } : {}),
   };
+  // Optional: process due cycles/jobs inside THIS process (set EMBEDDED_WORKER=true on the API service when no separate worker runs).
+  if (process.env.EMBEDDED_WORKER === 'true') {
+    const workerId = `embedded-${process.pid}`;
+    let busy = false;
+    setInterval(() => {
+      if (busy) return;
+      busy = true;
+      runner.runDueInline(workerId)
+        .then((r) => { if (r.cycles > 0 || r.jobs > 0) i.logger.info({ ...r }, 'embedded worker pass'); })
+        .catch((e: unknown) => i.logger.error({ errName: e instanceof Error ? e.name : 'unknown' }, 'embedded worker pass failed'))
+        .finally(() => { busy = false; });
+    }, 15_000).unref();
+    i.logger.info({ intervalMs: 15_000 }, 'embedded worker enabled');
+  }
   return { apiDeps, runner, uploads, mockMode, providers, tokenRefresh, retention, rateStore };
 }

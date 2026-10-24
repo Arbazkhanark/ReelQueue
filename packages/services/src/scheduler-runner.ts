@@ -1,3 +1,4 @@
+//packages/services/src/scheduler-runner.ts
 import {
   PublishExecutor,
   ProviderError,
@@ -47,26 +48,46 @@ export class SchedulerRunner {
     const cycle = await this.d.store.getCycleById(cycleId);
     if (!cycle) return { decision: 'GONE', cycleStatus: null, newJobs: [], nextTickAt: null, quotaLimited: false, deferredByQuota: 0 };
 
+    // let quota: PublishQuota | null = null;
+    // if (cycle.status === 'ACTIVE') {
+    //   try {
+    //     quota = await this.d.providers.resolve(cycle.provider).getPublishingQuota(cycle.accountId);
+    //   } catch (err) {
+    //     // Unknown quota fails closed: the engine defers instead of publishing.
+    //     const kind = err instanceof ProviderError ? err.kind : 'UNEXPECTED';
+    //     this.log.warn({ cycleId, kind }, 'quota lookup failed; deferring batch');
+    //   }
+    // }
     let quota: PublishQuota | null = null;
     if (cycle.status === 'ACTIVE') {
       try {
         quota = await this.d.providers.resolve(cycle.provider).getPublishingQuota(cycle.accountId);
+        this.log.info({ cycleId, accountId: cycle.accountId, used: quota.used, total: quota.total, windowSeconds: quota.windowSeconds }, 'quota fetched');
       } catch (err) {
         // Unknown quota fails closed: the engine defers instead of publishing.
         const kind = err instanceof ProviderError ? err.kind : 'UNEXPECTED';
-        this.log.warn({ cycleId, kind }, 'quota lookup failed; deferring batch');
+        const pe = err as { code?: unknown; subcode?: unknown; httpStatus?: unknown };
+        this.log.warn({
+          cycleId, accountId: cycle.accountId, kind, code: pe.code, subcode: pe.subcode, httpStatus: pe.httpStatus,
+          ...(err instanceof ProviderError ? { message: err.message } : { errName: err instanceof Error ? err.name : 'unknown' }),
+        }, 'quota lookup failed; deferring batch');
       }
     }
     const result = await this.d.store.tick(cycleId, now, quota, this.d.tickConfig);
     if (quota) await this.d.store.recordQuota(cycle.accountId, quota);
     for (const j of result.newJobs) await this.d.queue.wakeJob(j.id, j.runAt);
     if (result.nextTickAt) await this.d.queue.wakeCycle(cycleId, result.nextTickAt);
-    this.log.info({ cycleId, decision: result.decision, created: result.newJobs.length }, 'tick');
+    // this.log.info({ cycleId, decision: result.decision, created: result.newJobs.length }, 'tick');
+    this.log.info({
+      cycleId, decision: result.decision, created: result.newJobs.length, quotaKnown: quota !== null,
+      quotaLimited: result.quotaLimited, deferredByQuota: result.deferredByQuota, nextTickAt: result.nextTickAt ? result.nextTickAt.toISOString() : null,
+    }, 'tick');
     return result;
   }
 
   async runJob(jobId: string, workerId: string): Promise<ExecuteOutcome> {
     const outcome = await this.d.executor.execute(jobId, workerId);
+    this.log.info({ jobId, workerId, outcome: outcome.kind }, 'job executed');
     switch (outcome.kind) {
       case 'WAIT':
         await this.d.queue.wakeJob(jobId, outcome.runAt);
@@ -95,7 +116,22 @@ export class SchedulerRunner {
     for (const j of jobs) await this.d.queue.wakeJob(j.id, now);
     const cycles = await this.d.store.findDueCycles(now, limit);
     for (const c of cycles) await this.d.queue.wakeCycle(c.id, now);
+    if (jobs.length > 0 || cycles.length > 0) this.log.info({ jobs: jobs.length, cycles: cycles.length }, 'sweep re-woke due work');
     return { jobs: jobs.length, cycles: cycles.length };
+  }
+
+  /** Runs due cycles and jobs directly, without BullMQ. For deployments with no separate worker process; idempotent like the worker. */
+  async runDueInline(workerId: string, limit = 20): Promise<{ cycles: number; jobs: number }> {
+    const now = this.d.clock.now();
+    const cycles = await this.d.store.findDueCycles(now, limit);
+    for (const c of cycles) {
+      try { await this.runCycleTick(c.id); } catch (e) { this.log.warn({ cycleId: c.id, errName: e instanceof Error ? e.name : 'unknown' }, 'inline tick failed'); }
+    }
+    const jobs = await this.d.store.findDueJobs(now, limit);
+    for (const j of jobs) {
+      try { await this.runJob(j.id, workerId); } catch (e) { this.log.warn({ jobId: j.id, errName: e instanceof Error ? e.name : 'unknown' }, 'inline job failed'); }
+    }
+    return { cycles: cycles.length, jobs: jobs.length };
   }
 
   /** Wake the next due job of the account that `jobId` belongs to (keeps per-account order flowing without polling). */
