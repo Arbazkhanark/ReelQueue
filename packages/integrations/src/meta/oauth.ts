@@ -1,3 +1,4 @@
+// packages/integrations/metaserc/oauth.ts
 import { ProviderError, type Clock } from '@reelqueue/core';
 import { classifyMetaError, type HttpFn } from './provider';
 
@@ -93,9 +94,41 @@ export class MetaOAuthClient {
       try { json = text ? JSON.parse(text) : null; } catch { json = null; }
       if (res.status < 200 || res.status >= 300) {
         // OAuth endpoints answer a bad/used/expired code or bad credentials with 400 (and sometimes a different error body shape):
+        const payload = json as {
+          error?: {
+            code?: number;
+            type?: string;
+            error_subcode?: number;
+          };
+        } | null;
+
+        const metaError = payload?.error;
+        console.log({
+            event: 'instagram.oauth.token_exchange_failed',
+            step,
+            httpStatus: res.status,
+            errorCode: metaError?.code ?? null,
+            errorType: metaError?.type ?? null,
+            errorSubcode: metaError?.error_subcode ?? null,
+          },
+          'Instagram OAuth token exchange failed',
+        );
+
+
+        
         // classify as VALIDATION unless Meta's regular error envelope says otherwise.
-        const e = classifyMetaError(res.status, (json as { error?: { code?: number } } | null));
-        throw new ProviderError(e.kind === 'UNKNOWN' ? 'VALIDATION' : e.kind, `Instagram OAuth ${step} failed (HTTP ${res.status})`, { httpStatus: res.status, ...(e.code ? { code: e.code } : {}) });
+        // const e = classifyMetaError(res.status, (json as { error?: { code?: number } } | null));
+        // throw new ProviderError(e.kind === 'UNKNOWN' ? 'VALIDATION' : e.kind, `Instagram OAuth ${step} failed (HTTP ${res.status})`, { httpStatus: res.status, ...(e.code ? { code: e.code } : {}) });
+        
+          const e = classifyMetaError(res.status, payload);
+          throw new ProviderError(
+            e.kind === 'UNKNOWN' ? 'VALIDATION' : e.kind,
+            `Instagram OAuth ${step} failed (HTTP ${res.status})`,
+            {
+              httpStatus: res.status,
+              ...(e.code ? { code: e.code } : {}),
+            },
+          );
       }
       if (json === null || typeof json !== 'object') throw new ProviderError('UNKNOWN', `Instagram OAuth ${step} returned an unreadable response`, { httpStatus: res.status });
       return json as Record<string, unknown>;
