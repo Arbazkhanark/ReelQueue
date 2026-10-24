@@ -1,3 +1,4 @@
+// apps/web/src/lib/api.ts
 /**
  * Typed API client built from the shared ROUTES table (the single source of truth for method/path/types).
  * Request and response types come from the RouteSpec phantom members; nothing is redefined here.

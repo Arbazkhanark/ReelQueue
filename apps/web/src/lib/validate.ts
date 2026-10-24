@@ -1,3 +1,4 @@
+// apps/web/src/lib/validate.ts
 /** Client-side validators. Server remains the authority; these give instant feedback against GET /settings `limits`. */
 
 export interface RangeLimit {

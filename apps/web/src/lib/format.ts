@@ -1,3 +1,4 @@
+// apps/web/src/lib/format.ts
 /** Pure formatting helpers (no framework imports). All times are rendered in the user's timezone. */
 
 const DASH = '—';
