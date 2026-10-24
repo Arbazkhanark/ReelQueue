@@ -358,6 +358,13 @@ export class GoogleDriveService {
     return toDto(f);
   }
 
+  /** Metadata needed to import a Drive video as a ReelQueue video (no bytes are downloaded). */
+  async getForImport(userId: string, fileId: string): Promise<{ name: string; mimeType: string; sizeBytes: number | null; isFolder: boolean; video: { durationMs: number; width: number; height: number } | null }> {
+    const f = await this.call(userId, (t) => this.drive.getFile(t, fileId));
+    if (f.trashed) throw new AppError('NOT_FOUND', 'File not found, or not accessible to ReelQueue.');
+    return { name: f.name, mimeType: f.mimeType, sizeBytes: f.sizeBytes, isFolder: f.isFolder, video: f.video ?? null };
+  }
+
   /** Validates against the same media rules as the S3 upload flow, creates the app folder on first use, and returns a resumable session. */
   async startUpload(userId: string, f: { filename: string; contentType: string; sizeBytes: number }): Promise<{ sessionUri: string }> {
     const name = cleanName(f.filename);

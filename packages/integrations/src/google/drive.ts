@@ -156,16 +156,29 @@ export interface DriveClientConfig { requestTimeoutMs: number; maxFileBytes?: nu
 export interface DriveFile {
   id: string; name: string; mimeType: string; sizeBytes: number | null; createdTime: string | null; modifiedTime: string | null;
   md5Checksum: string | null; parents: string[]; trashed: boolean; isFolder: boolean; createdByApp: boolean;
+  /** Duration/size as computed by Google for video files; null until Google has processed the file. */
+  video?: { durationMs: number; width: number; height: number } | null;
 }
 export const FOLDER_MIME = 'application/vnd.google-apps.folder';
 export const APP_PROPERTY = 'reelqueue';
-const FIELDS = 'id,name,mimeType,size,createdTime,modifiedTime,md5Checksum,parents,trashed,appProperties';
+// const FIELDS = 'id,name,mimeType,size,createdTime,modifiedTime,md5Checksum,parents,trashed,appProperties';
+const FIELDS = 'id,name,mimeType,size,createdTime,modifiedTime,md5Checksum,parents,trashed,appProperties,videoMediaMetadata';
 const ID = /^[A-Za-z0-9_-]{10,128}$/;
 
 export function assertDriveId(id: string, what = 'file'): string {
   if (!ID.test(id)) throw new GoogleApiError('VALIDATION', `Invalid Drive ${what} id`);
   return id;
 }
+
+function parseVideo(v: unknown): { durationMs: number; width: number; height: number } | null {
+  const m = (v ?? null) as Record<string, unknown> | null;
+  if (!m || typeof m !== 'object') return null;
+  const dur = typeof m.durationMillis === 'string' ? Number(m.durationMillis) : typeof m.durationMillis === 'number' ? m.durationMillis : NaN;
+  const w = typeof m.width === 'number' ? m.width : NaN;
+  const h = typeof m.height === 'number' ? m.height : NaN;
+  return Number.isFinite(dur) && dur > 0 && Number.isInteger(w) && w > 0 && Number.isInteger(h) && h > 0 ? { durationMs: Math.round(dur), width: w, height: h } : null;
+}
+
 const GOOGLE_HOST = /^https:\/\/([a-z0-9-]+\.)*googleapis\.com\//;
 const retryAll = (e: GoogleApiError) => e.kind === 'UNAVAILABLE' || e.kind === 'RATE_LIMITED';
 const retryRateOnly = (e: GoogleApiError) => e.kind === 'RATE_LIMITED';
@@ -197,6 +210,7 @@ export class DriveClient {
       id: r.id, name: r.name, mimeType: mime, sizeBytes: size, createdTime: typeof r.createdTime === 'string' ? r.createdTime : null, modifiedTime: typeof r.modifiedTime === 'string' ? r.modifiedTime : null,
       md5Checksum: typeof r.md5Checksum === 'string' ? r.md5Checksum : null, parents: Array.isArray(r.parents) ? r.parents.map(String) : [], trashed: r.trashed === true, isFolder: mime === FOLDER_MIME,
       createdByApp: (r.appProperties as Record<string, unknown> | undefined)?.[APP_PROPERTY] === '1',
+      video: parseVideo(r.videoMediaMetadata),
     };
   }
 

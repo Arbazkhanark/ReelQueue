@@ -1,7 +1,8 @@
+// packages/runtime/src/compose.ts
 import { MemoryRateLimitStore, RateLimiter, ScryptPasswordHasher, seededRng, TokenCipher, PublishExecutor, type Clock, type StorageProvider, type ProviderResolver, MockInstagramProvider, type InstagramProvider } from '@reelqueue/core';
 import { AccountStore, AuthStore, PgJobStore, QueryStore, SchedulerStore, SettingsStore, VideoStore, DEFAULT_TICK_CONFIG, FallbackRateLimitStore, PgRateLimitStore, RetentionStore, type SqlExecutor } from '@reelqueue/db';
 import { MetaInstagramProvider, MetaOAuthClient, probeVideo, type HttpFn } from '@reelqueue/integrations';
-import { AccountService, AuthService, CompositeProviderResolver, CycleService, DbTokenResolver, DEFAULT_AUTH_CONFIG, DEFAULT_TOKEN_REFRESH_CONFIG, InstagramConnectService, OAUTH_STATE_MAX_AGE_MS, RetentionService, TokenRefreshService, DEFAULT_UPLOAD_CONFIG, MeService, ReadService, SchedulerRunner, SettingsService, StorageMediaUrlProvider, UploadFlow, UploadService, type Mailer, type MediaProbe, type WakeQueue } from '@reelqueue/services';
+import { AccountService, AuthService, CompositeProviderResolver, CycleService, DbTokenResolver, DEFAULT_AUTH_CONFIG, DEFAULT_TOKEN_REFRESH_CONFIG, InstagramConnectService, OAUTH_STATE_MAX_AGE_MS, RetentionService, TokenRefreshService, DEFAULT_UPLOAD_CONFIG, MeService, ReadService, SchedulerRunner, SettingsService, StorageMediaUrlProvider,SourceMediaUrlProvider, DriveMediaSigner, UploadFlow, UploadService, type Mailer, type MediaProbe, type WakeQueue } from '@reelqueue/services';
 import type { ApiDeps, ApiLogger } from '@reelqueue/http';
 import type { AppConfig } from './config';
 import { GFetch,GoogleOAuthClient,DriveClient } from '@reelqueue/integrations'
@@ -26,6 +27,8 @@ export function compose(i: ComposeInput) {
   const { cfg, db, clock } = i;
   const mockMode = cfg.instagramProvider === 'mock';
   const cipher = TokenCipher.fromEnv(cfg.tokenKeys, cfg.tokenActiveKeyId);
+  // Signed URLs for videos that stay in Google Drive. The API's public origin is taken from the Drive redirect URI.
+  const driveMedia = cfg.googleDrive ? new DriveMediaSigner(cfg.jwtSecret, new URL(cfg.googleDrive.redirectUri).origin, () => clock.now()) : undefined;
 
   const videos = new VideoStore(db), query = new QueryStore(db), accounts = new AccountStore(db), settingsStore = new SettingsStore(db), sched = new SchedulerStore(db);
   const mock = i.mockProvider ?? new MockInstagramProvider(() => clock.now());
@@ -37,12 +40,16 @@ export function compose(i: ComposeInput) {
   // In meta mode the mock provider is still resolvable for MOCK accounts, but the API cannot create them (AccountService gate).
   const providers: ProviderResolver = new CompositeProviderResolver({ mock, ...(meta ? { meta } : {}) });
 
-  const executor = new PublishExecutor({ store: new PgJobStore(db), providers, clock, rng: seededRng(i.rngSeed ?? clock.now().getTime() % 2 ** 31), media: new StorageMediaUrlProvider(videos, i.storage) });
+  const executor = new PublishExecutor({ store: new PgJobStore(db), providers, clock, rng: seededRng(i.rngSeed ?? clock.now().getTime() % 2 ** 31), 
+  // media: new StorageMediaUrlProvider(videos, i.storage) 
+  media: new SourceMediaUrlProvider(videos, i.storage, driveMedia)
+  });
   const runner = new SchedulerRunner({ store: sched, executor, providers, queue: i.queue, clock, tickConfig: DEFAULT_TICK_CONFIG, logger: { info: (o, m) => i.logger.info(o, m), warn: (o, m) => i.logger.info({ ...o, level: 'warn' }, m) } });
 
   const limitsFor = async (userId: string) => { const s = await settingsStore.get(userId); return { quotaBytes: s.storageQuotaBytes, maxVideos: s.maxVideos, maxBatchFiles: s.maxUploadBatch }; };
   const probe: MediaProbe = i.probe ?? { probe: (url) => probeVideo(url) };
-  const uploads = new UploadService(videos, i.storage, probe, clock, DEFAULT_UPLOAD_CONFIG, undefined, limitsFor);
+  // const uploads = new UploadService(videos, i.storage, probe, clock, DEFAULT_UPLOAD_CONFIG, undefined, limitsFor);
+  const uploads = new UploadService(videos, i.storage, probe, clock, DEFAULT_UPLOAD_CONFIG, undefined, limitsFor, driveMedia);
   const read = new ReadService({ cycles: sched, query, accounts, settings: settingsStore, uploads, videos, clock, mockMode });
   const cycles = new CycleService(sched, accounts, settingsStore, providers, i.queue, read, clock);
   const auth = new AuthService(new AuthStore(db), new ScryptPasswordHasher(), i.mailer, clock, { ...DEFAULT_AUTH_CONFIG, jwtSecret: cfg.jwtSecret });

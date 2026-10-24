@@ -8,3 +8,4 @@ export * from './instagram-oauth';
 
 
 export * from './google-drive';
+export * from './drive-media';

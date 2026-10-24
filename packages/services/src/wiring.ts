@@ -1,10 +1,33 @@
+// packages/services/src/wiring.ts
 import { DecryptionError, MediaUnavailableError, ProviderError, type InstagramProvider, type MediaUrlProvider, type ProviderResolver, type StorageProvider, type TokenCipher } from '@reelqueue/core';
 import type { MetaCredentials, TokenResolver } from '@reelqueue/integrations';
+import type { DriveMediaSigner } from './drive-media';
 
 /** Production adapters that glue stores to the core/integration ports. No test doubles here. */
 
 /** AAD binds a ciphertext to its owner, so a token copied to another account/user fails to decrypt. */
 export const tokenAad = (userId: string, providerAccountId: string): string => `ig-token:${userId}:${providerAccountId}`;
+
+
+/** Same as StorageMediaUrlProvider, but videos that live in Google Drive get a signed URL served by the API itself. */
+export class SourceMediaUrlProvider implements MediaUrlProvider {
+  constructor(
+    private readonly videos: { getPublishingSource(videoId: string): Promise<{ storageKey: string; sourceType: 'S3' | 'GOOGLE_DRIVE' } | null> },
+    private readonly storage: Pick<StorageProvider, 'presignDownload'>,
+    private readonly driveMedia?: Pick<DriveMediaSigner, 'sign'>,
+  ) {}
+  async getFetchUrl(videoId: string, ttlSeconds: number): Promise<string> {
+    const s = await this.videos.getPublishingSource(videoId);
+    if (!s) throw new MediaUnavailableError(`Video ${videoId} is not available for publishing (not READY or deleted)`);
+    if (s.sourceType === 'GOOGLE_DRIVE') {
+      if (!this.driveMedia) throw new Error('Google Drive media URLs are not configured on this process (GOOGLE_DRIVE_* / JWT_SECRET)'); // transient: fix the config and the job retries
+      return this.driveMedia.sign(videoId, ttlSeconds).url;
+    }
+    return this.storage.presignDownload(s.storageKey, { expiresSeconds: ttlSeconds });
+  }
+}
+
+
 
 export class StorageMediaUrlProvider implements MediaUrlProvider {
   constructor(private readonly videos: { getStorageKeyForPublishing(videoId: string): Promise<string | null> }, private readonly storage: Pick<StorageProvider, 'presignDownload'>) {}

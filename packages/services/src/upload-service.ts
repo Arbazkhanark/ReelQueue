@@ -1,9 +1,11 @@
+//packages/services/src/upload-service.ts
 import {
   buildStorageKey, storageLevel, validateMedia,
   type Clock, type MediaLimits, type MediaMetadata, type RejectedFile, type StorageProvider, type UploadFileSpec, type UploadLimits,
 } from '@reelqueue/core';
 import { VideoStore, type DeadObject, type VideoRow, type VideoStatus } from '@reelqueue/db';
 import { AppError } from '@reelqueue/shared';
+import type { DriveMediaSigner } from './drive-media';
 
 /** Media analysis port. Resolves null when the file has no video stream; REJECTS when the file cannot be read at all. */
 export interface MediaProbe { probe(url: string): Promise<MediaMetadata | null> }
@@ -44,6 +46,8 @@ export class UploadService {
     private readonly clock: Clock, private readonly cfg: UploadConfig = DEFAULT_UPLOAD_CONFIG, private readonly log: ServiceLogger = NOOP_LOG,
     /** Per-user limit overrides (e.g. from user_settings). Absent = the global config applies to everyone. */
     private readonly limitsFor?: (userId: string) => Promise<Partial<UploadLimits>>,
+    /** Signs the URLs under which videos that live in Google Drive are streamed (preview + Instagram fetch). */
+    private readonly driveMedia?: DriveMediaSigner,
   ) {}
 
   private async limits(userId: string): Promise<UploadLimits> {
@@ -100,6 +104,24 @@ export class UploadService {
     return this.result(fresh);
   }
 
+  /** Registers a Google Drive video as a READY ReelQueue video. No bytes move: Drive stays the storage. */
+  async importDriveVideo(userId: string, f: { driveFileId: string; filename: string; contentType: string; sizeBytes: number; durationMs: number; width: number; height: number }): Promise<VideoRow> {
+    const contentType = baseType(f.contentType) ?? '';
+    const verdict = validateMedia({ durationMs: f.durationMs, width: f.width, height: f.height } as MediaMetadata, this.cfg.media);
+    if (!verdict.ok) throw new AppError('VALIDATION_FAILED', `This video cannot be used as a Reel (${verdict.code}).`);
+    const r = await this.store.createExternalReady({ userId, driveFileId: f.driveFileId, filename: f.filename, contentType, sizeBytes: f.sizeBytes, durationMs: f.durationMs, width: f.width, height: f.height, limits: await this.limits(userId) });
+    if (!r.ok) throw new AppError(r.code, r.message);
+    return r.video;
+  }
+
+  /** For the signed media route: verifies the signature and returns what to stream. Every failure is the same NOT_FOUND. */
+  async resolveDriveMedia(videoId: string, exp: string | undefined, sig: string | undefined): Promise<{ userId: string; fileId: string; contentType: string; sizeBytes: number }> {
+    if (!this.driveMedia || !exp || !sig || !this.driveMedia.verify(videoId, exp, sig)) throw new AppError('NOT_FOUND', 'Not found.');
+    const s = await this.store.getPublishingSource(videoId);
+    if (!s || s.sourceType !== 'GOOGLE_DRIVE' || !s.googleDriveFileId) throw new AppError('NOT_FOUND', 'Not found.');
+    return { userId: s.userId, fileId: s.googleDriveFileId, contentType: s.contentType, sizeBytes: s.sizeBytes };
+  }
+
   /** The browser reports that its PUT failed. Marks the video FAILED (releasing quota) and removes any partial object. */
   async failClientUpload(userId: string, videoId: string): Promise<void> {
     const v = await this.store.getVideo(userId, videoId);
@@ -119,6 +141,11 @@ export class UploadService {
     const v = await this.store.getVideo(userId, videoId);
     if (!v) throw new AppError('NOT_FOUND', 'Video not found.');
     if (v.status !== 'READY') throw new AppError('INVALID_STATE', 'The video is not ready.');
+    if (v.sourceType === 'GOOGLE_DRIVE') {
+      if (!this.driveMedia) throw new AppError('INVALID_STATE', 'Google Drive playback is not configured.');
+      const s = this.driveMedia.sign(v.id, 300);
+      return { url: s.url, expiresAt: s.expiresAt };
+    }
     const ttl = 300;
     return { url: await this.storage.presignDownload(v.storageKey, { expiresSeconds: ttl }), expiresAt: new Date(this.clock.now().getTime() + ttl * 1000) };
   }

@@ -1,3 +1,4 @@
+//packages/db/src/video-store.ts
 import { randomUUID } from 'node:crypto';
 import { planUpload, type RejectedFile, type UploadFileSpec, type UploadLimits, type UploadPlan, type UploadUsage } from '@reelqueue/core';
 import { toDate, toNum, toStrOrNull, type Row, type SqlExecutor } from './sql';
@@ -7,16 +8,21 @@ export type VideoStatus = 'PENDING_UPLOAD' | 'VALIDATING' | 'READY' | 'REJECTED'
 export interface VideoRow {
   id: string; userId: string; batchId: string | null; filename: string; storageKey: string; contentType: string; sizeBytes: number;
   durationMs: number | null; width: number | null; height: number | null; status: VideoStatus; rejectionReason: string | null;
+  // caption: string | null; position: number; validationAttempts: number; createdAt: Date;
   caption: string | null; position: number; validationAttempts: number; createdAt: Date;
+  sourceType: 'S3' | 'GOOGLE_DRIVE'; googleDriveFileId: string | null;
 }
 const COLS = `id, user_id, upload_batch_id, original_filename, storage_key, content_type, size_bytes, duration_ms, width, height,
-  status, rejection_reason, caption, position, validation_attempts, created_at`;
+  status, rejection_reason, caption, position, validation_attempts, created_at, source_type, google_drive_file_id`;
+  // status, rejection_reason, caption, position, validation_attempts, created_at`;
 const mapVideo = (r: Row): VideoRow => ({
   id: String(r.id), userId: String(r.user_id), batchId: toStrOrNull(r.upload_batch_id), filename: String(r.original_filename),
   storageKey: String(r.storage_key), contentType: String(r.content_type), sizeBytes: toNum(r.size_bytes),
   durationMs: r.duration_ms == null ? null : toNum(r.duration_ms), width: r.width == null ? null : toNum(r.width),
   height: r.height == null ? null : toNum(r.height), status: r.status as VideoStatus, rejectionReason: toStrOrNull(r.rejection_reason),
-  caption: toStrOrNull(r.caption), position: toNum(r.position), validationAttempts: toNum(r.validation_attempts), createdAt: toDate(r.created_at),
+  // caption: toStrOrNull(r.caption), position: toNum(r.position), validationAttempts: toNum(r.validation_attempts), createdAt: toDate(r.created_at),
+    caption: toStrOrNull(r.caption), position: toNum(r.position), validationAttempts: toNum(r.validation_attempts), createdAt: toDate(r.created_at),
+    sourceType: r.source_type === 'GOOGLE_DRIVE' ? 'GOOGLE_DRIVE' : 'S3', googleDriveFileId: toStrOrNull(r.google_drive_file_id),
 });
 
 export interface ReservedItem { index: number; videoId: string; storageKey: string; contentType: string; sizeBytes: number; filename: string }
@@ -73,6 +79,41 @@ export class VideoStore {
   async getStorageKeyForPublishing(videoId: string): Promise<string | null> {
     const r = await this.db.query(`SELECT storage_key FROM videos WHERE id = $1 AND status = 'READY' AND deleted_at IS NULL`, [videoId]);
     return r[0] ? String(r[0].storage_key) : null;
+  }
+
+  
+  /** System use (media route, publish executor): where the bytes of a still-usable video live. Never expose through an API. */
+  async getPublishingSource(videoId: string): Promise<{ userId: string; storageKey: string; sourceType: 'S3' | 'GOOGLE_DRIVE'; googleDriveFileId: string | null; contentType: string; sizeBytes: number } | null> {
+    const r = (await this.db.query(
+      `SELECT user_id, storage_key, source_type, google_drive_file_id, content_type, size_bytes FROM videos WHERE id = $1 AND status = 'READY' AND deleted_at IS NULL`, [videoId]))[0];
+    return r ? { userId: String(r.user_id), storageKey: String(r.storage_key), sourceType: r.source_type === 'GOOGLE_DRIVE' ? 'GOOGLE_DRIVE' : 'S3', googleDriveFileId: toStrOrNull(r.google_drive_file_id), contentType: String(r.content_type), sizeBytes: toNum(r.size_bytes) } : null;
+  }
+
+  /**
+   * A video whose bytes stay in Google Drive: checked against the same quota/limit rules, then created READY in one
+   * transaction under the user's usage lock. `storage_deleted_at` is set at once because there is no object of ours to delete.
+   */
+  async createExternalReady(a: { userId: string; driveFileId: string; filename: string; contentType: string; sizeBytes: number; durationMs: number; width: number; height: number; limits: UploadLimits }):
+    Promise<{ ok: true; video: VideoRow } | Extract<UploadPlan, { ok: false }> | { ok: false; code: 'CONFLICT' | 'VALIDATION_FAILED'; message: string }> {
+    return this.db.transaction(async (tx) => {
+      await tx.exec(`INSERT INTO storage_usage (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, [a.userId]);
+      const u = (await tx.query(`SELECT bytes_used, bytes_reserved, video_count FROM storage_usage WHERE user_id = $1 FOR UPDATE`, [a.userId]))[0]!;
+      const usage: UploadUsage = { videoCount: toNum(u.video_count), bytesUsed: toNum(u.bytes_used), bytesReserved: toNum(u.bytes_reserved) };
+      const dup = await tx.query(`SELECT 1 FROM videos WHERE user_id = $1 AND source_type = 'GOOGLE_DRIVE' AND google_drive_file_id = $2 AND deleted_at IS NULL LIMIT 1`, [a.userId, a.driveFileId]);
+      if (dup[0]) return { ok: false as const, code: 'CONFLICT' as const, message: 'This Google Drive file is already imported.' };
+      const plan = planUpload([{ filename: a.filename, contentType: a.contentType, sizeBytes: a.sizeBytes }], a.limits, usage);
+      if (!plan.ok) return plan;
+      if (plan.accepted.length === 0) return { ok: false as const, code: 'VALIDATION_FAILED' as const, message: plan.rejected[0]?.message ?? 'The video cannot be imported.' };
+      const videoId = randomUUID();
+      const pos = toNum((await tx.query(`SELECT COALESCE(MAX(position) + 1, 0) AS p FROM videos WHERE user_id = $1 AND deleted_at IS NULL`, [a.userId]))[0]!.p);
+      await tx.exec(
+        `INSERT INTO videos (id, user_id, original_filename, storage_key, content_type, size_bytes, duration_ms, width, height, status, position, source_type, google_drive_file_id, storage_deleted_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'READY',$10,'GOOGLE_DRIVE',$11,now())`,
+        [videoId, a.userId, a.filename, `gdrive/${a.userId}/${videoId}`, a.contentType.toLowerCase(), a.sizeBytes, Math.max(1, Math.round(a.durationMs)), a.width, a.height, pos, a.driveFileId]);
+      await tx.exec(`UPDATE storage_usage SET bytes_used = bytes_used + $2, video_count = video_count + 1 WHERE user_id = $1`, [a.userId, a.sizeBytes]);
+      const row = (await tx.query(`SELECT ${COLS} FROM videos WHERE id = $1`, [videoId]))[0]!;
+      return { ok: true as const, video: mapVideo(row) };
+    });
   }
 
   async getVideo(userId: string, videoId: string): Promise<VideoRow | null> {
