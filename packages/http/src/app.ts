@@ -1323,8 +1323,6 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
   //   },
   // });
 
-
-
     user({
     method: 'POST',
     pattern: '/v1/google-drive/files/:id/import',
@@ -1354,8 +1352,39 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
       }
 
       let stage = 'drive-download';
+      let targetHost: string | undefined;
+      let transferredBytes = 0;
+      const startedAt = Date.now();
+
+      // Never log the full signed URL, query parameters, tokens, or headers.
+      const logInfo = (event: string, extra: Record<string, unknown> = {}) => {
+        d.logger.info(
+          {
+            event,
+            requestId,
+            userId,
+            driveFileId: fileId,
+            videoId: target.videoId,
+            stage,
+            elapsedMs: Date.now() - startedAt,
+            ...extra,
+          },
+          event,
+        );
+      };
       try {
+        logInfo('drive.import.started', {
+          filename: file.name,
+          contentType,
+          sizeBytes,
+        });
+
+        logInfo('drive.import.download.started');
         const source = await gd().openDownload(userId, fileId);
+
+        logInfo('drive.import.download.opened', {
+          sourceSizeBytes: source.sizeBytes,
+        });
         if (source.sizeBytes !== null && source.sizeBytes !== sizeBytes) {
           throw new AppError('VALIDATION_FAILED', 'Google Drive file size changed. Please try again.');
         }
@@ -1365,6 +1394,9 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
         if (sizeBytes <= IMPORT_BUFFER_LIMIT) {
           // body = (await readAll(source.stream, sizeBytes)) as unknown as BodyInit; // known length: S3/R2 accept this
           body = await readAll(source.stream, sizeBytes);
+          logInfo('drive.import.download.buffered', {
+            transferredBytes,
+          });
         } else {
           streaming = true;
           const iterator = source.stream[Symbol.asyncIterator]();
@@ -1387,45 +1419,236 @@ export function createApi(d: ApiDeps): (req: HttpRequest) => Promise<HttpRespons
           });
         }
 
+        logInfo('drive.import.download.streaming', {
+            expectedBytes: sizeBytes,
+        });
+
         stage = 'storage-upload';
-        const response = await fetch(target.url, {
-          method: 'PUT',
-          headers: streaming ? { ...target.headers, 'content-length': String(sizeBytes) } : target.headers,
-          body,
-          ...(streaming ? { duplex: 'half' } : {}),
-        } as RequestInit);
+        try {
+          targetHost = new URL(target.url).host;
+        } catch {
+          targetHost = 'invalid-target-url';
+        }
+
+        logInfo('drive.import.storage-upload.started', {
+          targetHost,
+          streaming,
+          expectedBytes: sizeBytes,
+          bufferedBytes: streaming ? undefined : transferredBytes,
+        });
+
+        let response: Response;
+
+        try {
+          response = await fetch(target.url, {
+            method: 'PUT',
+            headers: streaming
+              ? {
+                  ...target.headers,
+                  'content-length': String(sizeBytes),
+                }
+              : target.headers,
+            body,
+            ...(streaming ? { duplex: 'half' } : {}),
+          } as RequestInit);
+        } catch (error) {
+          const info = describeError(error);
+          d.logger.error(
+            {
+              event: 'drive.import.storage-upload.connection-failed',
+              requestId,
+              userId,
+              driveFileId: fileId,
+              videoId: target.videoId,
+              stage,
+              targetHost,
+              streaming,
+              expectedBytes: sizeBytes,
+              transferredBytes,
+              elapsedMs: Date.now() - startedAt,
+              errName: info.name,
+              errCode: info.code,
+              errMessage: info.message,
+              cause: error instanceof Error && error.cause instanceof Error
+                ? {
+                    name: error.cause.name,
+                    code: 'code' in error.cause
+                      ? error.cause.code
+                      : undefined,
+                    message: error.cause.message,
+                  }
+                : undefined,
+            },
+            'Google Drive import: storage upload request failed',
+          );
+          throw error;
+        }
+
+        logInfo('drive.import.storage-upload.response', {
+          targetHost,
+          status: response.status,
+          ok: response.ok,
+        });
+
+
         if (!response.ok) {
           const text = await response.text().catch(() => '');
           const s3Code = /<Code>([A-Za-z0-9_]{1,64})<\/Code>/.exec(text)?.[1];
-          throw new AppError('INTERNAL', `Storage rejected the upload (HTTP ${response.status}${s3Code ? `, ${s3Code}` : ''}). Check the S3_* settings on the API.`);
+
+          // Do not log the raw response body; it may contain sensitive data.
+          d.logger.error(
+            {
+              event: 'drive.import.storage-upload.rejected',
+              requestId,
+              targetHost,
+              status: response.status,
+              storageErrorCode: s3Code,
+            },
+            'Storage rejected the video upload',
+          );
+
+          throw new AppError(
+            'INTERNAL',
+            `Storage rejected the upload (HTTP ${response.status}${s3Code ? `, ${s3Code}` : ''}). Check the configured storage settings.`,
+          );
         }
+
+        // response = await fetch(target.url, {
+        //   method: 'PUT',
+        //   headers: streaming ? { ...target.headers, 'content-length': String(sizeBytes) } : target.headers,
+        //   body,
+        //   ...(streaming ? { duplex: 'half' } : {}),
+        // } as RequestInit);
+        // if (!response.ok) {
+        //   const text = await response.text().catch(() => '');
+        //   const s3Code = /<Code>([A-Za-z0-9_]{1,64})<\/Code>/.exec(text)?.[1];
+        //   throw new AppError('INTERNAL', `Storage rejected the upload (HTTP ${response.status}${s3Code ? `, ${s3Code}` : ''}). Check the S3_* settings on the API.`);
+        // }
 
         // Existing service verifies object size/type and probes the real media.
         stage = 'verify';
+        logInfo('drive.import.verify.started');
         let result;
         try {
           result = await d.uploads.complete(userId, target.videoId);
+          logInfo('drive.import.verify.completed', {
+            status: result.status,
+            reason: result.reason,
+            durationMs: result.video.durationMs,
+            width: result.video.width,
+            height: result.video.height,
+          });
         } catch (e) {
           if (e instanceof AppError) throw e;
           const info = describeError(e);
-          d.logger.error({ event: 'drive.import.verify_failed', requestId, errName: info.name, errCode: info.code, errMessage: info.message }, 'video verification threw');
-          throw new AppError('INTERNAL', `The video was copied but could not be checked (${info.code ?? info.name}). If this says ENOENT, ffprobe is not installed on the API server.`);
-        }
-        if (result.status !== 'READY') {
-          throw new AppError('VALIDATION_FAILED', result.reason ?? 'The imported file did not pass video validation.');
+          d.logger.error(
+            {
+              event: 'drive.import.verify.failed',
+              requestId,
+              userId,
+              driveFileId: fileId,
+              videoId: target.videoId,
+              stage,
+              errName: info.name,
+              errCode: info.code,
+              errMessage: info.message,
+              elapsedMs: Date.now() - startedAt,
+            },
+            'Video verification failed',
+          );
+          if (e instanceof AppError) throw e;
+
+          throw new AppError(
+            'INTERNAL',
+            `Video verification failed (${info.code ?? info.name}). Check server logs.`,
+          );
         }
 
+        if (result.status !== 'READY') {
+          throw new AppError(
+            'VALIDATION_FAILED',
+            result.reason ?? 'The imported file did not pass video validation.',
+          );
+        }
+        //   throw new AppError('INTERNAL', `The video was copied but could not be checked (${info.code ?? info.name}). If this says ENOENT, ffprobe is not installed on the API server.`);
+        // }
+        // if (result.status !== 'READY') {
+        //   throw new AppError('VALIDATION_FAILED', result.reason ?? 'The imported file did not pass video validation.');
+        // }
+
+        logInfo('drive.import.succeeded', {
+          status: result.status,
+          transferredBytes,
+        });
         return json(201, { video: (await d.read.videoDtos(userId, [result.video]))[0] });
       } catch (error) {
-        // Release the reservation and remove any partial object on failure.
-        await d.uploads.failClientUpload(userId, target.videoId).catch(() => undefined);
-        if (error instanceof AppError) throw error;
         const info = describeError(error);
-        d.logger.error({ event: 'drive.import.failed', requestId, stage, errName: info.name, errCode: info.code, errMessage: info.message }, 'google drive import failed');
-        throw new AppError('INTERNAL', `Import failed at "${stage}" (${info.code ?? info.name}).`);
+
+        d.logger.error(
+          {
+            event: 'drive.import.failed',
+            requestId,
+            userId,
+            driveFileId: fileId,
+            videoId: target.videoId,
+            stage,
+            targetHost,
+            transferredBytes,
+            expectedBytes: sizeBytes,
+            elapsedMs: Date.now() - startedAt,
+            errName: info.name,
+            errCode: info.code,
+            errMessage: info.message,
+            cause: error instanceof Error && error.cause instanceof Error
+              ? {
+                  name: error.cause.name,
+                  code: 'code' in error.cause
+                    ? error.cause.code
+                    : undefined,
+                  message: error.cause.message,
+                }
+              : undefined,
+          },
+          'Google Drive import failed',
+        );
+
+        // Release reservation and clean up any partial upload.
+        await d.uploads.failClientUpload(userId, target.videoId).catch(
+          (cleanupError) => {
+            const cleanupInfo = describeError(cleanupError);
+
+            d.logger.error(
+              {
+                event: 'drive.import.cleanup.failed',
+                requestId,
+                videoId: target.videoId,
+                errName: cleanupInfo.name,
+                errCode: cleanupInfo.code,
+                errMessage: cleanupInfo.message,
+              },
+              'Failed to clean up the unsuccessful import',
+            );
+          },
+        );
+
+        if (error instanceof AppError) throw error;
+
+        throw new AppError(
+          'INTERNAL',
+          `Import failed at "${stage}" (${info.code ?? info.name}).`,
+        );
+        
+        // // Release the reservation and remove any partial object on failure.
+        // await d.uploads.failClientUpload(userId, target.videoId).catch(() => undefined);
+        // if (error instanceof AppError) throw error;
+        // const info = describeError(error);
+        // d.logger.error({ event: 'drive.import.failed', requestId, stage, errName: info.name, errCode: info.code, errMessage: info.message }, 'google drive import failed');
+        // throw new AppError('INTERNAL', `Import failed at "${stage}" (${info.code ?? info.name}).`);
       }
     },
   });
+
+  
 
   // CHANGED: Google Drive binary upload route.
   user({

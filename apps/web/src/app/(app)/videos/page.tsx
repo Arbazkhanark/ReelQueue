@@ -312,7 +312,7 @@ function DriveFiles({ videos, onImported }: { videos: VideoDto[]; onImported: ()
     for (let i = 0; i < todo.length; i++) {
       const f = todo[i]!;
       setProg({ done: i, total: todo.length, current: f.name });
-      try { await call('listDriveFiles', { params: { id: f.id } }); ok++; }
+      try { await call('importDriveFile', { params: { id: f.id } }); ok++; }
       catch (e) { failed.push({ name: f.name, message: errorMessage(e) }); }
     }
     setProg(null); setErrors(failed); setPicked(new Set());
