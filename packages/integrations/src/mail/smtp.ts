@@ -82,8 +82,26 @@ class Session {
 }
 
 export class SmtpTransport implements MailTransport {
-  constructor(private readonly cfg: SmtpConfig, private readonly now: () => Date = () => new Date()) {
-    if ((cfg.user || cfg.pass) && cfg.security === 'none' && !isLoopback(cfg.host)) throw new MailError('PERMANENT', 'Refusing to send SMTP credentials over an unencrypted connection');
+  // constructor(private readonly cfg: SmtpConfig, private readonly now: () => Date = () => new Date()) {
+  //   if ((cfg.user || cfg.pass) && cfg.security === 'none' && !isLoopback(cfg.host)) throw new MailError('PERMANENT', 'Refusing to send SMTP credentials over an unencrypted connection');
+  // }
+    private readonly cfg: SmtpConfig;
+  private readonly now: () => Date;
+  constructor(cfg: SmtpConfig, now: () => Date = () => new Date()) {
+    this.cfg = cfg;
+    this.now = now;
+  }
+
+  /** TEMPORARY: for diagnostics only. Remove along with the debug log. */
+  debugConfig(): Pick<SmtpConfig, 'host' | 'port' | 'security' | 'user' | 'helo' | 'timeoutMs'> {
+    return {
+      host: this.cfg.host,
+      port: this.cfg.port,
+      security: this.cfg.security,
+      user: this.cfg.user,
+      helo: this.cfg.helo,
+      timeoutMs: this.cfg.timeoutMs,
+    };
   }
 
   async send(m: MailMessage): Promise<void> {

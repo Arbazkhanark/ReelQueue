@@ -25,10 +25,29 @@ export class LogMailer implements Mailer {
 export class SmtpMailer implements Mailer {
   private inFlight = 0;
   private pending = new Set<Promise<void>>();
+  // constructor(
+  //   private readonly transport: MailTransport, private readonly from: string, private readonly appUrl: string,
+  //   private readonly log: (o: Record<string, unknown>, m: string) => void, private readonly maxInFlight = 50,
+  // ) {}
   constructor(
-    private readonly transport: MailTransport, private readonly from: string, private readonly appUrl: string,
-    private readonly log: (o: Record<string, unknown>, m: string) => void, private readonly maxInFlight = 50,
-  ) {}
+  private readonly transport: MailTransport,
+  private readonly from: string,
+  private readonly appUrl: string,
+  private readonly log: (o: Record<string, unknown>, m: string) => void,
+  private readonly maxInFlight = 50,
+) {
+  // ─── TEMPORARY DIAGNOSTIC. DELETE THIS BLOCK AFTER DEBUGGING. ───
+  const cfg = (transport as any)?.debugConfig?.();
+  this.log(
+    {
+      event: 'smtp.init',
+      from: this.from,
+      smtp: cfg ?? '(transport has no debugConfig — not SmtpTransport)',
+    },
+    'SMTP mailer initialised',
+  );
+  // ─── END TEMPORARY ───
+}
 
   sendVerificationEmail(to: string, rawToken: string): Promise<void> {
     return this.enqueue('verification', to, verificationMail(`${this.appUrl}/verify-email?token=${encodeURIComponent(rawToken)}`));
