@@ -1,3 +1,4 @@
+// packages/runtime/src/mailer.ts
 import type { Mailer } from '@reelqueue/services';
 import { MailError, type MailTransport } from '@reelqueue/integrations';
 import { passwordResetMail, verificationMail, type RenderedMail } from './mail-templates';
@@ -38,8 +39,35 @@ export class SmtpMailer implements Mailer {
   private enqueue(kind: string, to: string, mail: RenderedMail): Promise<void> {
     if (this.inFlight >= this.maxInFlight) { this.log({ kind, reason: 'BACKPRESSURE' }, 'mail dropped'); return Promise.resolve(); }
     this.inFlight++;
+    // .catch((e: unknown) => { this.log(e instanceof MailError ? { kind, failure: e.kind, smtpCode: e.smtpCode } : { kind, failure: 'UNKNOWN' }, 'mail send failed'); })
     const p = this.transport.send({ from: this.from, to, subject: mail.subject, text: mail.text, html: mail.html })
-      .catch((e: unknown) => { this.log(e instanceof MailError ? { kind, failure: e.kind, smtpCode: e.smtpCode } : { kind, failure: 'UNKNOWN' }, 'mail send failed'); })
+      .catch((e: unknown) => {
+        if (e instanceof MailError) {
+          this.log(
+            {
+              kind,
+              failure: e.kind,
+              smtpCode: e.smtpCode ?? null,
+              errorName: e.name,
+              errorMessage: e.message.slice(0, 500),
+            },
+            'mail send failed',
+          );
+          return;
+        }
+
+        // Do not log arbitrary objects or credentials.
+        const err = e instanceof Error ? e : null;
+        this.log(
+          {
+            kind,
+            failure: 'UNKNOWN',
+            errorName: err?.name ?? 'UnknownError',
+            errorMessage: (err?.message ?? 'Non-Error thrown').slice(0, 500),
+          },
+          'mail send failed',
+        );
+      })
       .finally(() => { this.inFlight--; this.pending.delete(p); });
     this.pending.add(p);
     return Promise.resolve();

@@ -43,8 +43,6 @@ function withEmailAliases(raw: Env, problems: string[]): Env {
   const e: Env = { ...raw };
   const set = (k: string, v: string | undefined) => { if (v !== undefined && v.trim() !== '' && !e[k]?.trim()) e[k] = v; };
   set('SMTP_HOST', raw.EMAIL_HOST); set('SMTP_PORT', raw.EMAIL_PORT); set('SMTP_USER', raw.EMAIL_USER); set('MAIL_FROM', raw.EMAIL_FROM);
-  console.log(raw.EMAIL_HOST,"---------------------------SMTP_HOST------------------------------------")
-  console.log(raw.EMAIL_PASS,"------------------------------EMAIL_PASS--------------------------------")
   // Google shows app passwords as "abcd efgh ijkl mnop"; the spaces are cosmetic.
   set('SMTP_PASS', raw.EMAIL_PASS !== undefined && /^[a-z]{4}( [a-z]{4}){3}$/.test(raw.EMAIL_PASS.trim()) ? raw.EMAIL_PASS.replace(/ /g, '') : raw.EMAIL_PASS?.trim());
   const sec = raw.EMAIL_SECURE?.trim().toLowerCase();

@@ -1,3 +1,4 @@
+// packages/runtime/src/mail-templates.ts
 /**
  * Transactional e-mail templates (HTML + plain-text alternative). Table layout and inline CSS only, because mail clients
  * ignore <style>/flexbox. Every dynamic value is HTML-escaped; the link is the only call to action.
