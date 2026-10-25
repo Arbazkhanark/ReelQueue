@@ -1,0 +1,28 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 112" fill="none">
+  <defs>
+    <linearGradient id="rq" x1="12" y1="10" x2="90" y2="90" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF914D"/>
+      <stop offset="1" stop-color="#B83219"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(8 7)">
+    <rect x="2" y="2" width="88" height="88" rx="24" fill="url(#rq)"/>
+    <path d="M20 24H69C76 24 81 29 81 36V43H20V24Z" fill="#FFF6EA"/>
+    <path d="M25 24L37 43M44 24L56 43M63 24L75 43"
+      stroke="#C84A25" stroke-width="5" stroke-linecap="round"/>
+    <path d="M20 48H69C76 48 81 53 81 60C81 67 76 72 69 72H44L20 86V48Z"
+      fill="#FFF6EA"/>
+    <path d="M45 52L61 61L45 70V52Z" fill="#C94324"/>
+    <circle cx="70" cy="72" r="17" fill="#FFF6EA" stroke="#B83219" stroke-width="3"/>
+    <path d="M70 62V72H78" stroke="#C94324" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <text x="112" y="66" font-family="Arial, Helvetica, sans-serif"
+    font-size="42" font-weight="800" letter-spacing="-2" fill="#25231F">Reel</text>
+  <text x="202" y="66" font-family="Arial, Helvetica, sans-serif"
+    font-size="42" font-weight="800" letter-spacing="-2" fill="#C94324">Queue</text>
+  <text x="113" y="91" font-family="Arial, Helvetica, sans-serif"
+    font-size="10" font-weight="700" letter-spacing="3" fill="#625D54">SCHEDULE · MANAGE · PUBLISH</text>
+</svg>

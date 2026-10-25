@@ -1,6 +1,7 @@
 
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
 
@@ -38,12 +39,22 @@ export default function ContactPage() {
     <main className="min-h-screen bg-[#f7f4ed] px-5 py-8 text-[#25231f] sm:px-8 sm:py-12">
       <div className="mx-auto max-w-4xl">
         <header className="flex items-center justify-between gap-4 border-b border-[#ded8cc] pb-6">
-          <Link
+          {/* <Link
             href="/"
             className="text-xl font-bold tracking-tight text-[#b94f2d] sm:text-2xl"
           >
             ReelQueue<span className="text-[#25231f]">.</span>
-          </Link>
+          </Link> */}
+            <Link href="/" aria-label="ReelQueue home" className="inline-flex items-center">
+            <Image
+                src="/reelqueue-logo.svg"
+                alt="ReelQueue"
+                width={240}
+                height={56}
+                priority
+                className="h-auto w-48 sm:w-56"
+            />
+            </Link>
 
           <Link
             href="/"

@@ -9,6 +9,7 @@ import { call, setUnauthenticatedHandler } from '@/lib/api';
 import { POLL_MS, useApi } from '@/lib/use-api';
 import { Button, Notice, SkeletonBlock } from '@/components/ui';
 import { ThemeToggle } from '@/components/theme';
+import Image from 'next/image';
 
 const NAV = [
   ['/dashboard', 'Dashboard'], ['/uploads', 'Upload'], ['/videos', 'Videos'], ['/cycles', 'Cycles'],
@@ -36,7 +37,17 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-4 px-4 py-4 md:flex-row">
       <nav aria-label="Main" className="md:w-48 md:shrink-0">
-        <p className="mb-3 font-display text-2xl">ReelQueue</p>
+        {/* <p className="mb-3 font-display text-2xl">ReelQueue</p> */}
+        <Link href="/" aria-label="ReelQueue home" className="inline-flex items-center">
+            <Image
+              src="/reelqueue-logo.svg"
+              alt="ReelQueue"
+              width={240}
+              height={56}
+              priority
+              className="h-auto w-48 sm:w-56"
+            />
+        </Link>
         <ul className="flex flex-wrap gap-1 md:flex-col">
           {NAV.map(([href, label]) => (
             <li key={href}>
