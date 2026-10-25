@@ -1,11 +1,17 @@
-// apps/web/src/app/layout.tsx
 import './globals.css';
 import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
 import { ToastProvider } from '@/components/toast';
 import { THEME_INIT_SCRIPT } from '@/components/theme';
 
-export const metadata: Metadata = { title: 'ReelQueue', description: 'Bulk upload, schedule and auto-publish Reels through the official Instagram API.' };
+export const metadata: Metadata = {
+  title: 'ReelQueue',
+  description:
+    'Bulk upload, schedule and auto-publish Reels through the official Instagram API.',
+  verification: {
+    google: 'TfU4SAB73tGhNXMQ5JQKa_lcrboVEIWzXp0z5UPTvCw',
+  },
+};
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
