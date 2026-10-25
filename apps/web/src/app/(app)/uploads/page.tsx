@@ -1,3 +1,4 @@
+// apps/web/src/app/\(app\)/uploads/page.tsx
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
