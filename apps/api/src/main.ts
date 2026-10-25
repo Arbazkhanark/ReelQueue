@@ -15,7 +15,7 @@ import { createApi, createNodeServer } from '@reelqueue/http';
 import { BullWakeQueue, LogMailer, NodemailerTransport, SmtpMailer, QUEUE_NAME, compose, loadConfig, ConfigError } from '@reelqueue/runtime';
 
 const log = (level: 'info' | 'error') => (o: Record<string, unknown>, msg: string) => console[level === 'info' ? 'log' : 'error'](JSON.stringify({ level, msg, time: new Date().toISOString(), ...o }));
-const logger = { info: log('info'), error: log('error') };
+export const logger = { info: log('info'), error: log('error') };
 
 async function main(): Promise<void> {
   let cfg;
