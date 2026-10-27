@@ -9,3 +9,5 @@ export * from './mail/smtp';
 export * from './google/common';
 export * from './google/oauth';
 export * from './google/drive';
+
+export * from './payments/razorpay';

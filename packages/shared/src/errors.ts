@@ -32,6 +32,10 @@ export const API_ERROR_CODES = [
   'GOOGLE_DRIVE_NOT_CONNECTED',
   'GOOGLE_DRIVE_REAUTH_REQUIRED',
   'GOOGLE_DRIVE_UNAVAILABLE', // Google Drive refused or could not be reached (never carries Google's text)
+
+  // Billing
+  'PAYMENT_REQUIRED',
+  'PAYMENT_UNAVAILABLE',
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
@@ -78,6 +82,9 @@ export const API_ERROR_STATUS: Record<ApiErrorCode, number> = {
   GOOGLE_DRIVE_NOT_CONNECTED: 409,
   GOOGLE_DRIVE_REAUTH_REQUIRED: 409,
   GOOGLE_DRIVE_UNAVAILABLE: 502,
+  // Billing
+  PAYMENT_REQUIRED: 402,
+  PAYMENT_UNAVAILABLE: 502,
 };
 
 /** Thrown by services; the API layer maps it to HTTP using API_ERROR_STATUS. */
@@ -91,3 +98,48 @@ export class AppError extends Error {
     this.name = 'AppError';
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// // packages/shared/src/errors.ts  (scratch copy: original codes + the two billing codes added at the end)
+// export const API_ERROR_CODES = [
+//   'VALIDATION_FAILED', 'UNAUTHENTICATED', 'FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'RATE_LIMITED', 'EMAIL_NOT_VERIFIED', 'EMAIL_TAKEN',
+//   'INVALID_CREDENTIALS', 'ACCOUNT_LOCKED', 'ACCOUNT_SUSPENDED', 'TOKEN_INVALID', 'STORAGE_QUOTA_EXCEEDED', 'UPLOAD_LIMIT_EXCEEDED',
+//   'UNSUPPORTED_MEDIA', 'VIDEO_IN_USE', 'INSTAGRAM_NOT_CONNECTED', 'INSTAGRAM_REAUTH_REQUIRED', 'INSTAGRAM_ACCOUNT_INELIGIBLE',
+//   'CYCLE_ALREADY_ACTIVE', 'CYCLE_NOT_ACTIVE', 'CYCLE_EXPIRED', 'QUEUE_EMPTY', 'INVALID_STATE', 'JOB_NOT_RETRYABLE', 'MOCK_ONLY', 'INTERNAL',
+//   'GOOGLE_DRIVE_NOT_CONNECTED', 'GOOGLE_DRIVE_REAUTH_REQUIRED', 'GOOGLE_DRIVE_UNAVAILABLE',
+//   // Billing
+//   'PAYMENT_REQUIRED',
+//   'PAYMENT_UNAVAILABLE',
+// ] as const;
+// export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
+
+// export const API_ERROR_STATUS: Record<ApiErrorCode, number> = {
+//   VALIDATION_FAILED: 400, UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, RATE_LIMITED: 429, EMAIL_NOT_VERIFIED: 403,
+//   EMAIL_TAKEN: 409, INVALID_CREDENTIALS: 401, ACCOUNT_LOCKED: 423, ACCOUNT_SUSPENDED: 403, TOKEN_INVALID: 400, STORAGE_QUOTA_EXCEEDED: 413,
+//   UPLOAD_LIMIT_EXCEEDED: 413, UNSUPPORTED_MEDIA: 415, VIDEO_IN_USE: 409, INSTAGRAM_NOT_CONNECTED: 409, INSTAGRAM_REAUTH_REQUIRED: 409,
+//   INSTAGRAM_ACCOUNT_INELIGIBLE: 422, CYCLE_ALREADY_ACTIVE: 409, CYCLE_NOT_ACTIVE: 409, CYCLE_EXPIRED: 409, QUEUE_EMPTY: 422, INVALID_STATE: 409,
+//   JOB_NOT_RETRYABLE: 409, MOCK_ONLY: 404, INTERNAL: 500, GOOGLE_DRIVE_NOT_CONNECTED: 409, GOOGLE_DRIVE_REAUTH_REQUIRED: 409, GOOGLE_DRIVE_UNAVAILABLE: 502,
+//   // Billing
+//   PAYMENT_REQUIRED: 402,
+//   PAYMENT_UNAVAILABLE: 502,
+// };
+
+// export class AppError extends Error {
+//   constructor(readonly code: ApiErrorCode, message: string, readonly details?: { field: string; message: string }[]) {
+//     super(message);
+//     this.name = 'AppError';
+//   }
+// }

@@ -86,6 +86,35 @@ export const ROUTES = {
   downloadDriveFile: r<void, void>('GET', '/v1/google-drive/files/:id/content', 'user'), // streamed bytes, not JSON
   deleteDriveFile: r<void, void>('DELETE', '/v1/google-drive/files/:id', 'user'),
   disconnectGoogleDrive: r<void, void>('DELETE', '/v1/google-drive/connection', 'user'),
+
+
+
+
+
+
+
+    // Billing Routes
+  billingStatus: r<void, import('./billing').BillingStatusDto>(
+    'GET',
+    '/v1/billing/status',
+    'user',
+  ),
+
+  billingCheckout: r<
+    import('./billing').CreateCheckoutRequest,
+    import('./billing').CreateCheckoutResponse
+  >('POST', '/v1/billing/checkout', 'user'),
+
+  billingVerify: r<
+    import('./billing').VerifyPaymentRequest,
+    void
+  >('POST', '/v1/billing/verify', 'user'),
+
+  billingSync: r<void, void>(
+    'POST',
+    '/v1/billing/sync',
+    'user',
+  ),
 } as const;
 
 export type RouteName = keyof typeof ROUTES;
